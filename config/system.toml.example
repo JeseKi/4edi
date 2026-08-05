@@ -1,0 +1,191 @@
+# 非敏感的后端版本化配置。
+# 环境变量优先于本文件；密码、Token、数据库 URL 与 VITE_* 请放在 .env 或部署环境中。
+
+[app]
+# 启动时加载的功能包；可用 all 便捷启用当前环境支持的全部功能。
+# 可选值及含义：
+#   auth                        用户认证（注册/登录/JWT/两步验证/密码重置）
+#   admin                       管理后台（用户管理/角色权限/作用域）；依赖 auth
+#   audit                       操作审计日志；依赖 auth
+#   oauth-login                 OAuth 登录（GitHub/Google）；依赖 auth
+#   oauth-provider              OAuth Provider（对外提供 OAuth 服务）；依赖 auth
+#   files                       文件上传与下载（本地/S3 存储）；依赖 auth
+#   example                     示例模块（演示用途）；依赖 auth
+#   frontend-error-reporting    前端运行时错误上报（无需 auth）
+#   notifications               通知功能；依赖 auth
+#   dev-providers               开发环境 mock provider；仅在 dev 环境生效
+enabled_features = ["auth", "admin", "files", "example", "frontend-error-reporting","audit", "notifications"]
+# 允许浏览器跨域调用 API 的 Origin 列表。
+allowed_origins = ["http://localhost:5173"]
+# 生成密码重置等对外链接时使用的公开域名；为空则不生成此类链接。
+domain = ""
+# Uvicorn Web 服务监听端口。
+port = 8000
+
+[database]
+# PostgreSQL Web 连接池的常驻连接数；SQLite 模式忽略。
+pool_size = 5
+# PostgreSQL Web 连接池允许的额外溢出连接数；SQLite 模式忽略。
+max_overflow = 5
+# Web 请求等待 PostgreSQL 连接的最长秒数。
+pool_timeout_seconds = 30
+# PostgreSQL Web 连接回收前的最长存活秒数。
+pool_recycle_seconds = 1800
+# Web 短事务执行器允许的最大并发数，不能超过连接池总预算。
+executor_max_workers = 4
+# 短事务等待执行槽位的最长秒数，超时后返回 503。
+executor_queue_timeout_seconds = 30
+# PostgreSQL 短事务中单条 SQL 的最长执行秒数。
+executor_statement_timeout_seconds = 60
+# 容器启动时 Alembic 迁移失败后的最大重试次数。
+migration_retry_attempts = 30
+# 两次 Alembic 迁移尝试之间的等待秒数。
+migration_retry_interval_seconds = 2
+
+[task_database]
+# 后台 worker PostgreSQL 连接池的常驻连接数。
+pool_size = 2
+# 后台 worker 连接池允许的额外溢出连接数。
+max_overflow = 0
+# 后台 worker 等待数据库连接的最长秒数。
+pool_timeout_seconds = 5
+# 后台 worker 数据库连接回收前的最长存活秒数。
+pool_recycle_seconds = 1800
+
+[logging]
+# 应用和 worker 的最低输出日志级别。
+level = "info"
+# 相对项目根目录的日志文件目录。
+directory = "logs"
+# 单个日志文件的轮转条件，使用 Loguru 语法。
+rotation = "20 MB"
+# 轮转日志的保留规则，使用 Loguru 语法。
+retention = "14 days"
+# 是否把文件日志序列化为 JSON。
+serialize = false
+
+[tasks]
+# I/O 队列的并发 worker 数。
+io_workers = 4
+# 通知队列的并发 worker 数。
+notification_workers = 2
+# 批处理队列的并发 worker 数。
+batch_workers = 2
+# Worker 收到停止信号后等待任务完成的最长秒数。
+shutdown_timeout_seconds = 30
+# Worker 轮询并领取可执行任务的间隔秒数。
+dispatch_poll_interval_seconds = 0.2
+# 已领取后台任务的租约时长秒数。
+job_lease_seconds = 60
+# 执行中后台任务刷新租约的心跳间隔秒数。
+job_heartbeat_interval_seconds = 10
+
+[frontend_error_reporting]
+# 单次前端错误上报请求体允许的最大字节数。
+max_payload_bytes = 65536
+# 每个 IP 每分钟允许的前端错误上报次数。
+rate_limit_per_minute = 30
+
+[notifications]
+# 通知功能允许使用的外部浏览器 Origin；为空表示不额外信任外部来源。
+trusted_external_origins = []
+
+[providers]
+# 开发环境中使用本地 mock 实现的外部 Provider；可选 github_oauth、google_oauth、turnstile、mail、example_external_api。
+external_provider_mock_list = []
+# 示例 real provider 请求的外部 API 基础地址。
+example_external_api_base_url = ""
+# mock-provider 脚本发布运行时配置到后端的地址。
+mock_provider_backend_url = "http://localhost:8000"
+# mock-provider 脚本重复发布运行时配置的间隔秒数。
+mock_provider_publish_interval_seconds = 2
+
+[files]
+# 文件资产存储驱动；可选 local 或 s3。
+storage_driver = "local"
+# local 驱动保存上传对象的相对项目根目录路径。
+local_root = "data/uploads"
+# S3 或兼容对象存储使用的 Bucket 名称。
+s3_bucket = ""
+# S3 客户端使用的区域名称。
+s3_region = "us-east-1"
+# S3 兼容对象存储的可选 Endpoint URL。
+s3_endpoint_url = ""
+# S3 请求寻址方式；可选 auto、path 或 virtual。
+s3_addressing_style = "auto"
+# 下载和直传预签名 URL 的有效秒数。
+presign_ttl_seconds = 900
+# 等待完成的文件上传意图有效分钟数。
+upload_ttl_minutes = 60
+# 单个文件上传允许的最大字节数。
+max_upload_bytes = 52428800
+# 允许用户上传的文件扩展名白名单。
+allowed_extensions = [".csv", ".docx", ".gif", ".jpeg", ".jpg", ".pdf", ".png", ".pptx", ".txt", ".webp", ".xlsx"]
+
+[auth]
+# JWT 的签名算法。
+jwt_algorithm = "HS256"
+# Access Token 的有效分钟数。
+access_token_ttl_minutes = 15
+# Refresh Token 的有效天数。
+refresh_token_ttl_days = 7
+# 保存 Refresh Token 的 Cookie 名称。
+refresh_cookie_name = "fullstack_template_refresh_token"
+# Refresh Token Cookie 的 SameSite 策略。
+refresh_cookie_samesite = "lax"
+# 是否只通过 HTTPS 发送 Refresh Token Cookie。
+refresh_cookie_secure = false
+# 二次验证登录挑战的有效分钟数。
+two_factor_challenge_ttl_minutes = 5
+# 两步验证绑定确认的有效分钟数。
+two_factor_setup_ttl_minutes = 10
+# 显示在验证器应用中的 TOTP 签发方名称。
+two_factor_issuer_name = "Fullstack Template"
+# 每次生成的两步验证备份码数量。
+two_factor_backup_code_count = 8
+# 单个两步验证挑战允许的最大失败次数。
+two_factor_max_verify_attempts = 5
+# 是否启用 Cloudflare Turnstile 人机校验。
+turnstile_enabled = false
+# 请求 Turnstile 校验接口的最长秒数。
+turnstile_verify_timeout_seconds = 4
+
+[mail]
+# Web 请求异步投递邮件时使用的最大执行槽位数。
+executor_max_workers = 4
+# 等待邮件执行槽位的最长秒数。
+executor_queue_timeout_seconds = 30
+# SMTP 服务的主机名或 IP 地址。
+smtp_host = "smtp.example.com"
+# SMTP 服务端口。
+smtp_port = 465
+# 是否使用隐式 SSL 连接 SMTP。
+use_ssl = true
+# 是否在连接后通过 STARTTLS 升级 SMTP 连接。
+use_tls = false
+# SMTP 网络操作的最长秒数。
+timeout = 5
+# 可选：发送邮件时使用的 From 邮箱地址。
+# sender_email = "noreply@example.com"
+# 可选：邮件中显示的发件人名称。
+# sender_name = "Fullstack Template"
+
+[oauth]
+# 启用用户登录的 OAuth Provider；可选 GITHUB、GOOGLE。
+enabled_providers = []
+# GitHub OAuth App 的公开 Client ID。
+github_client_id = ""
+# GitHub OAuth 授权完成后的回调地址。
+github_redirect_uri = "http://localhost:8000/api/oauth/github/callback"
+# 向 GitHub 请求的 OAuth Scope。
+github_scope = "read:user user:email"
+# Google OAuth Client 的公开 Client ID。
+google_client_id = ""
+# Google OAuth 授权完成后的回调地址。
+google_redirect_uri = "http://localhost:8000/api/oauth/google/callback"
+# 向 Google 请求的 OAuth Scope。
+google_scope = "openid email profile"
+# 登录回调生成的一次性 OAuth ticket 有效分钟数。
+oauth_ticket_ttl_minutes = 5
+# OAuth 授权请求 State 参数的有效分钟数。
+oauth_state_ttl_minutes = 10

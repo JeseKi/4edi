@@ -1,0 +1,103 @@
+services:
+  postgres:
+    build:
+      context: .
+      dockerfile: docker/postgres-backup/Dockerfile
+    image: fullstack-template-postgres-backup:local
+    entrypoint: ["/usr/local/bin/postgres-backup-postgres-entrypoint"]
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-template}
+      POSTGRES_USER: ${POSTGRES_USER:-template}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      PG_BACKUP_ENABLED: ${PG_BACKUP_ENABLED:-false}
+      PG_BACKUP_MODE: ${PG_BACKUP_MODE:-auto}
+      PG_BACKUP_STANZA: ${PG_BACKUP_STANZA:-${POSTGRES_DB:-template}}
+      PG_BACKUP_LOCAL_PATH: /var/lib/pgbackrest
+      PG_BACKUP_STATUS_DIR: /var/lib/postgres-backup-status
+      PG_BACKUP_REPO_CIPHER_PASS: ${PG_BACKUP_REPO_CIPHER_PASS:-}
+      PG_BACKUP_AGE_RECIPIENT: ${PG_BACKUP_AGE_RECIPIENT:-}
+      PG_BACKUP_S3_BUCKET: ${PG_BACKUP_S3_BUCKET:-}
+      PG_BACKUP_S3_ENDPOINT: ${PG_BACKUP_S3_ENDPOINT:-}
+      PG_BACKUP_S3_PORT: ${PG_BACKUP_S3_PORT:-443}
+      PG_BACKUP_S3_REGION: ${PG_BACKUP_S3_REGION:-us-east-1}
+      PG_BACKUP_S3_ACCESS_KEY_ID: ${PG_BACKUP_S3_ACCESS_KEY_ID:-}
+      PG_BACKUP_S3_SECRET_ACCESS_KEY: ${PG_BACKUP_S3_SECRET_ACCESS_KEY:-}
+      PG_BACKUP_S3_PREFIX: ${PG_BACKUP_S3_PREFIX:-/${POSTGRES_DB:-template}}
+      PG_BACKUP_S3_URI_STYLE: ${PG_BACKUP_S3_URI_STYLE:-path}
+      PG_BACKUP_S3_VERIFY_TLS: ${PG_BACKUP_S3_VERIFY_TLS:-y}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - postgres-runtime:/var/run/postgresql
+      - postgres-backups:/var/lib/pgbackrest
+      - postgres-backup-status:/var/lib/postgres-backup-status
+    networks:
+      - database
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 5s
+
+  postgres-backup:
+    image: fullstack-template-postgres-backup:local
+    entrypoint: ["/usr/local/bin/postgres-backup-entrypoint"]
+    command: ["/usr/local/bin/postgres-backup-runner", "daemon"]
+    restart: unless-stopped
+    user: "999:999"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-template}
+      POSTGRES_USER: ${POSTGRES_USER:-template}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      PG_BACKUP_ENABLED: ${PG_BACKUP_ENABLED:-false}
+      PG_BACKUP_MODE: ${PG_BACKUP_MODE:-auto}
+      PG_BACKUP_STANZA: ${PG_BACKUP_STANZA:-${POSTGRES_DB:-template}}
+      PG_BACKUP_LOCAL_PATH: /var/lib/pgbackrest
+      PG_BACKUP_STATUS_DIR: /var/lib/postgres-backup-status
+      PG_BACKUP_REPO_CIPHER_PASS: ${PG_BACKUP_REPO_CIPHER_PASS:-}
+      PG_BACKUP_AGE_RECIPIENT: ${PG_BACKUP_AGE_RECIPIENT:-}
+      PG_BACKUP_S3_BUCKET: ${PG_BACKUP_S3_BUCKET:-}
+      PG_BACKUP_S3_ENDPOINT: ${PG_BACKUP_S3_ENDPOINT:-}
+      PG_BACKUP_S3_PORT: ${PG_BACKUP_S3_PORT:-443}
+      PG_BACKUP_S3_REGION: ${PG_BACKUP_S3_REGION:-us-east-1}
+      PG_BACKUP_S3_ACCESS_KEY_ID: ${PG_BACKUP_S3_ACCESS_KEY_ID:-}
+      PG_BACKUP_S3_SECRET_ACCESS_KEY: ${PG_BACKUP_S3_SECRET_ACCESS_KEY:-}
+      PG_BACKUP_S3_PREFIX: ${PG_BACKUP_S3_PREFIX:-/${POSTGRES_DB:-template}}
+      PG_BACKUP_S3_URI_STYLE: ${PG_BACKUP_S3_URI_STYLE:-path}
+      PG_BACKUP_S3_VERIFY_TLS: ${PG_BACKUP_S3_VERIFY_TLS:-y}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data:ro
+      - postgres-runtime:/var/run/postgresql:ro
+      - postgres-backups:/var/lib/pgbackrest
+      - postgres-backup-status:/var/lib/postgres-backup-status
+    networks:
+      - database
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "/usr/local/bin/postgres-backup-healthcheck"]
+      interval: 1m
+      timeout: 10s
+      retries: 2
+      start_period: 10m
+
+  app:
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-template}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}@postgres:5432/${POSTGRES_DB:-template}
+    networks:
+      - default
+      - database
+
+volumes:
+  postgres-data:
+  postgres-runtime:
+  postgres-backups:
+  postgres-backup-status:
+
+networks:
+  database:
+    internal: true

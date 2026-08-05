@@ -1,0 +1,17 @@
+services:
+  app:
+    restart: unless-stopped
+    build:
+      context: .
+      args:
+        MIRROR_MODE: ${MIRROR_MODE:-auto}
+    ports:
+      - target: 8000
+        published: ${HOST_PORT:-8000}
+        protocol: tcp
+    env_file:
+      - .env
+    volumes:
+      - ./config:/app/config:ro
+      - ./data:/app/data:rw
+      - ./logs:/app/logs:rw

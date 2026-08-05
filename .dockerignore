@@ -1,0 +1,39 @@
+# Version-control and local agent/editor metadata
+.git/
+.agents/
+.vscode/
+.idea/
+.DS_Store
+
+# Local dependencies and build/test caches
+node_modules/
+.pnpm-store/
+.venv/
+dist/
+dist-ssr/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+**/__pycache__/
+**/*.py[cod]
+**/*.test.*
+**/tests/
+
+# Runtime and developer-generated files
+logs/
+data/
+tmp/
+tmp*/
+*.log
+*.db
+
+# Repository documentation and local orchestration files are not needed to build
+*.md
+AGENTS.md
+docker-compose*.yml
+.gitignore
+
+# Keep scripts/ in the build context: operational utilities are included in the
+# final image for on-container maintenance and diagnostics.
+!scripts/
+!scripts/**
