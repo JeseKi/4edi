@@ -189,3 +189,41 @@ google_scope = "openid email profile"
 oauth_ticket_ttl_minutes = 5
 # OAuth 授权请求 State 参数的有效分钟数。
 oauth_state_ttl_minutes = 10
+
+[mall]
+# 未支付订单自动取消的分钟数。
+order_pay_timeout_minutes = 30
+# 发货后自动确认收货的天数。
+auto_confirm_receipt_days = 7
+# 店铺审核通过时记入钱包的保证金金额（分）。
+default_deposit_fen = 1000
+# 订单默认运费（分）。
+freight_fen = 0
+# 支付通道；mock 为本地模拟支付，real 为真实微信支付。
+payment_mode = "mock"
+# 以下为真实微信支付（payment_mode = "real"）时所需的商户参数。
+wechat_pay_app_id = ""
+wechat_pay_merchant_id = ""
+wechat_pay_private_key_path = ""
+wechat_pay_cert_serial_no = ""
+wechat_pay_apiv3_key = ""
+# 微信支付回调公网基础地址；为空时使用 app.domain。
+wechat_pay_notify_base_url = ""
+
+[sms]
+# 腾讯云短信 SecretId（也可用 TENCENTCLOUD_SECRET_ID 环境变量）。
+secret_id = ""
+# 腾讯云短信 SecretKey（也可用 TENCENTCLOUD_SECRET_KEY 环境变量）。
+secret_key = ""
+# 腾讯云短信应用 SDKAppID。
+sdk_app_id = ""
+# 腾讯云短信签名名称。
+sign_name = ""
+# 腾讯云短信验证码模板 ID。
+template_id = ""
+# 腾讯云短信服务地域。
+region = "ap-guangzhou"
+# 腾讯云短信 API 接入点。
+endpoint = "sms.tencentcloudapi.com"
+# 腾讯云短信请求的最长秒数。
+timeout_seconds = 10

@@ -15,6 +15,7 @@ from src.server.mail import MailAddress, MailContent, send_mail
 
 from .mail_utils import is_mail_configured
 from .mail_templates import build_auth_email_html
+from .sms import deliver_phone_verification_code
 
 
 VERIFICATION_CODE_MAX_ATTEMPTS = 5
@@ -89,6 +90,36 @@ def send_verification_code(email: str) -> str:
             raise RuntimeError("验证码邮件发送失败")
         logger.warning("开发/测试环境忽略邮件发送失败，验证码仍可使用")
 
+    return code
+
+
+def send_phone_verification_code(phone: str) -> str:
+    """生成并发送手机短信验证码。"""
+    now = datetime.now(timezone.utc)
+    existing_data = verification_codes.get(phone)
+    if existing_data is not None:
+        last_sent = existing_data.get("sent_at")
+        if isinstance(last_sent, datetime):
+            elapsed_seconds = (now - last_sent).total_seconds()
+            if elapsed_seconds < VERIFICATION_CODE_SEND_COOLDOWN_SECONDS:
+                retry_after_seconds = int(
+                    VERIFICATION_CODE_SEND_COOLDOWN_SECONDS - elapsed_seconds
+                )
+                retry_after_seconds = max(retry_after_seconds, 1)
+                raise ValueError(f"发送过于频繁，请 {retry_after_seconds} 秒后再试")
+
+    code = generate_verification_code()
+    expires_minutes = VERIFICATION_CODE_EXPIRES_MINUTES
+    expiry = now + timedelta(minutes=expires_minutes)
+
+    verification_codes[phone] = {
+        "code": code,
+        "expiry": expiry,
+        "sent_at": now,
+        "attempts": 0,
+    }
+
+    deliver_phone_verification_code(phone, code, expires_minutes=expires_minutes)
     return code
 
 

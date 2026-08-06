@@ -107,6 +107,21 @@ def _notifications_router() -> APIRouter:
     return router
 
 
+def _mall_routers() -> tuple[APIRouter, ...]:
+    from src.server.mall.router import admin_router, router, seller_router
+
+    return (router, seller_router, admin_router)
+
+
+def _mall_tasks() -> tuple[TaskDefinition, ...]:
+    from src.server.mall.service import (
+        MALL_ORDER_AUTO_CONFIRM,
+        MALL_ORDER_PAYMENT_TIMEOUT,
+    )
+
+    return (MALL_ORDER_PAYMENT_TIMEOUT, MALL_ORDER_AUTO_CONFIRM)
+
+
 def _file_tasks() -> tuple[TaskDefinition, ...]:
     from src.server.files.service import DELETE_FILE_OBJECT, EXPIRE_PENDING_FILE
 
@@ -142,6 +157,9 @@ FEATURE_CATALOG: dict[str, FeatureSpec] = {
     ),
     "notifications": FeatureSpec(
         "notifications", frozenset({"auth"}), _routers(_notifications_router)
+    ),
+    "mall": FeatureSpec(
+        "mall", frozenset({"auth"}), _mall_routers, _mall_tasks
     ),
     "dev-providers": FeatureSpec(
         "dev-providers", frozenset(), _routers(_dev_provider_router), dev_only=True

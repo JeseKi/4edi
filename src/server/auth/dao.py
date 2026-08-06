@@ -40,6 +40,12 @@ class UserDAO(BaseDAO):
             query = query.filter(User.deleted_at.is_(None))
         return query.first()
 
+    def get_by_phone(self, phone: str, *, include_deleted: bool = False) -> User | None:
+        query = self.db_session.query(User).filter(User.phone == phone)
+        if not include_deleted:
+            query = query.filter(User.deleted_at.is_(None))
+        return query.first()
+
     def get_by_id(self, user_id: int, *, include_deleted: bool = False) -> User | None:
         query = self.db_session.query(User).filter(User.id == user_id)
         if not include_deleted:

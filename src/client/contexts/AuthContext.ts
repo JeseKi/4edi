@@ -10,6 +10,9 @@ import type {
   PasswordChangeConfirmPayload,
   PasswordResetLinkPayload,
   PasswordResetWithTokenPayload,
+  PhonePasswordResetPayload,
+  PhoneRegisterWithCodePayload,
+  PhoneVerificationCodePayload,
   RegisterWithCodePayload,
   TwoFactorDisablePayload,
   TwoFactorRegenerateBackupCodesPayload,
@@ -31,6 +34,10 @@ export interface AuthContextValue {
   register: (payload: RegisterWithCodePayload) => Promise<UserProfile>
   registerWithCode: (payload: RegisterWithCodePayload) => Promise<UserProfile>
   sendVerificationCode: (payload: VerificationCodePayload) => Promise<{ message: string }>
+  sendPhoneVerificationCode: (payload: PhoneVerificationCodePayload) => Promise<{ message: string }>
+  registerWithPhoneCode: (payload: PhoneRegisterWithCodePayload) => Promise<UserProfile>
+  sendPhonePasswordResetCode: (payload: PhoneVerificationCodePayload) => Promise<{ message: string }>
+  resetPasswordByPhone: (payload: PhonePasswordResetPayload) => Promise<{ message: string }>
   sendPasswordResetLink: (payload: PasswordResetLinkPayload) => Promise<{ message: string }>
   resetPasswordWithToken: (payload: PasswordResetWithTokenPayload) => Promise<{ message: string }>
   sendEmailChangeCode: (payload: EmailChangeCodePayload) => Promise<{ message: string }>

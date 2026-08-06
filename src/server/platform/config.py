@@ -16,6 +16,7 @@ DEFAULT_ENABLED_FEATURES = [
     "example",
     "frontend-error-reporting",
     "notifications",
+    "mall",
 ]
 
 

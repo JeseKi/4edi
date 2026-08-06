@@ -16,6 +16,9 @@ import type {
   PasswordChangeConfirmPayload,
   PasswordResetLinkPayload,
   PasswordResetWithTokenPayload,
+  PhonePasswordResetPayload,
+  PhoneRegisterWithCodePayload,
+  PhoneVerificationCodePayload,
   RegisterWithCodePayload,
   TwoFactorDisablePayload,
   TwoFactorRegenerateBackupCodesPayload,
@@ -41,10 +44,14 @@ import {
   regenerateBackupCodes as regenerateBackupCodesRequest,
   register as registerRequest,
   registerWithCode as registerWithCodeRequest,
+  registerWithPhoneCode as registerWithPhoneCodeRequest,
+  resetPasswordByPhone as resetPasswordByPhoneRequest,
   resetPasswordWithToken as resetPasswordWithTokenRequest,
   sendEmailChangeCode as sendEmailChangeCodeRequest,
   sendPasswordChangeLink as sendPasswordChangeLinkRequest,
   sendPasswordResetLink as sendPasswordResetLinkRequest,
+  sendPhonePasswordResetCode as sendPhonePasswordResetCodeRequest,
+  sendPhoneVerificationCode as sendPhoneVerificationCodeRequest,
   sendVerificationCode as sendVerificationCodeRequest,
   startTwoFactorSetup as startTwoFactorSetupRequest,
   updateProfile,
@@ -118,6 +125,26 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
   const sendVerificationCode = useCallback(async (payload: VerificationCodePayload) => {
     const result = await sendVerificationCodeRequest(payload)
+    return result
+  }, [])
+
+  const sendPhoneVerificationCode = useCallback(async (payload: PhoneVerificationCodePayload) => {
+    const result = await sendPhoneVerificationCodeRequest(payload)
+    return result
+  }, [])
+
+  const registerWithPhoneCode = useCallback(async (payload: PhoneRegisterWithCodePayload) => {
+    const profile = await registerWithPhoneCodeRequest(payload)
+    return profile
+  }, [])
+
+  const sendPhonePasswordResetCode = useCallback(async (payload: PhoneVerificationCodePayload) => {
+    const result = await sendPhonePasswordResetCodeRequest(payload)
+    return result
+  }, [])
+
+  const resetPasswordByPhone = useCallback(async (payload: PhonePasswordResetPayload) => {
+    const result = await resetPasswordByPhoneRequest(payload)
     return result
   }, [])
 
@@ -230,7 +257,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       verifyTwoFactorLogin,
       register,
       registerWithCode,
+      registerWithPhoneCode,
       sendVerificationCode,
+      sendPhoneVerificationCode,
+      sendPhonePasswordResetCode,
+      resetPasswordByPhone,
       sendPasswordResetLink,
       sendEmailChangeCode: handleSendEmailChangeCode,
       confirmEmailChange: handleConfirmEmailChange,
@@ -254,7 +285,11 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       verifyTwoFactorLogin,
       register,
       registerWithCode,
+      registerWithPhoneCode,
       sendVerificationCode,
+      sendPhoneVerificationCode,
+      sendPhonePasswordResetCode,
+      resetPasswordByPhone,
       sendPasswordResetLink,
       handleSendEmailChangeCode,
       handleConfirmEmailChange,

@@ -9,7 +9,13 @@ from src.server.database_executor import DatabaseExecutor, get_database_executor
 from src.server.mail import MailDeliveryExecutor, get_mail_delivery_executor
 from .. import service
 from ..dao import UserDAO
-from ..schemas import PasswordResetLinkRequest, PasswordResetWithToken
+from ..schemas import (
+    PasswordResetLinkRequest,
+    PasswordResetWithToken,
+    PhonePasswordResetRequest,
+    PhoneVerificationCodeRequest,
+)
+from ..service.sms import normalize_mainland_phone
 from .base import router
 
 
@@ -134,3 +140,98 @@ def _password_reset_user_snapshot(db, email: str) -> dict[str, int | str] | None
     if user is None:
         return None
     return {"id": user.id, "username": user.username}
+
+
+@router.post(
+    "/forgot-password/phone-code",
+    summary="发送手机密码重置验证码",
+    responses={
+        200: {"description": "验证码发送成功"},
+        429: {"description": "发送过于频繁"},
+        500: {"description": "验证码发送失败"},
+    },
+)
+async def send_phone_password_reset_code(
+    request: Request,
+    payload: PhoneVerificationCodeRequest,
+):
+    normalized_phone = normalize_mainland_phone(payload.phone)
+    audit_service.attach_audit_context(
+        request.state,
+        action="auth.password_reset.request",
+        resource_type="auth",
+        target_summary="请求手机密码重置验证码",
+        actor_identifier=audit_service.mask_identifier(normalized_phone),
+    )
+    await service.verify_turnstile_token(
+        request=request,
+        token=payload.turnstile_token,
+        action="auth_forgot_password_phone_code",
+    )
+
+    try:
+        service.send_phone_password_reset_code(normalized_phone)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)
+        )
+    except RuntimeError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="验证码发送失败"
+        )
+    return {"message": "验证码已发送"}
+
+
+@router.post(
+    "/forgot-password/phone-reset",
+    summary="使用手机验证码重置密码",
+    responses={
+        200: {"description": "密码重置成功"},
+        400: {"description": "验证码无效或手机号未注册"},
+        404: {"description": "手机号不存在"},
+    },
+)
+async def reset_password_by_phone(
+    request: Request,
+    payload: PhonePasswordResetRequest,
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    normalized_phone = normalize_mainland_phone(payload.phone)
+    audit_service.attach_audit_context(
+        request.state,
+        action="auth.password.reset",
+        resource_type="user",
+        target_summary=f"手机号 {audit_service.mask_identifier(normalized_phone)}",
+        actor_identifier=audit_service.mask_identifier(normalized_phone),
+        detail={"verification_method": "phone_code"},
+    )
+    await service.verify_turnstile_token(
+        request=request,
+        token=payload.turnstile_token,
+        action="auth_forgot_password_phone_reset",
+    )
+
+    def _reset(db) -> dict:
+        user = UserDAO(db).get_by_phone(normalized_phone)
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="手机号未注册"
+            )
+        if not service.verify_code(normalized_phone, payload.code):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="验证码无效或已过期"
+            )
+        user.set_password(payload.new_password)
+        db.flush()
+        return {"id": user.id, "username": user.username}
+
+    user = await database_executor.run(_reset)
+    audit_service.attach_audit_context(
+        request.state,
+        action="auth.password.reset",
+        resource_type="user",
+        resource_id=user["id"],
+        target_summary=f"用户 {user['username']} (ID {user['id']})",
+        detail={"security_operation": "password_update", "verification_method": "phone_code"},
+    )
+    return {"message": "密码重置成功"}

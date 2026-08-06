@@ -26,6 +26,9 @@ import {
   TabletOutlined,
   BellOutlined,
   ExperimentOutlined,
+  ShoppingOutlined,
+  ShopOutlined,
+  TransactionOutlined,
 } from '@ant-design/icons'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
@@ -146,6 +149,41 @@ export default function MainLayout() {
             label: <Link to="/admin">管理员面板</Link>,
           },
         ],
+      })
+    }
+
+    if (enabledFeatures.has('mall')) {
+      const mallChildren: NonNullable<MenuProps['items']>[number][] = [
+        {
+          key: 'mall-home',
+          icon: <ShoppingOutlined />,
+          label: <Link to="/mall">商城首页</Link>,
+        },
+        {
+          key: 'mall-seller',
+          icon: <ShopOutlined />,
+          label: <Link to="/mall/seller/shop">商家中心</Link>,
+        },
+      ]
+      if (user?.role === 'admin' || user?.role === 'super_admin') {
+        mallChildren.push(
+          {
+            key: 'mall-admin-shops',
+            icon: <ShopOutlined />,
+            label: <Link to="/mall/admin/shops">店铺审核</Link>,
+          },
+          {
+            key: 'mall-admin-withdrawals',
+            icon: <TransactionOutlined />,
+            label: <Link to="/mall/admin/withdrawals">提现审核</Link>,
+          },
+        )
+      }
+      items.push({
+        key: 'mall-group',
+        icon: <ShoppingOutlined />,
+        label: '商城',
+        children: mallChildren,
       })
     }
 

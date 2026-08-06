@@ -14,8 +14,10 @@ from pydantic_settings import (
 )
 
 from src.server.auth.config import AuthConfig
+from src.server.auth.sms_config import SmsConfig
 from src.server.files.config import FilesConfig
 from src.server.mail.config import MailConfig
+from src.server.mall.config import MallConfig
 from src.server.oauth.config import OAuthConfig
 from src.server.platform.config import (
     AppConfig,
@@ -93,10 +95,20 @@ class SystemConfig(BaseSettings):
         title="认证配置",
         description="JWT、会话、二次验证与 Turnstile 配置。",
     )
+    sms: SmsConfig = Field(
+        default_factory=SmsConfig,
+        title="短信配置",
+        description="腾讯云短信验证码配置。",
+    )
     oauth: OAuthConfig = Field(
         default_factory=OAuthConfig,
         title="OAuth 配置",
         description="GitHub、Google 登录和 OAuth ticket 配置。",
+    )
+    mall: MallConfig = Field(
+        default_factory=MallConfig,
+        title="商城配置",
+        description="商城订单超时、自动收货、保证金与微信支付配置。",
     )
 
     model_config = SettingsConfigDict(case_sensitive=False, extra="ignore")

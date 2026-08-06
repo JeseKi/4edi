@@ -8,6 +8,7 @@ import {
   Form,
   Input,
   Modal,
+  Segmented,
   Space,
   Spin,
   Typography,
@@ -20,7 +21,9 @@ import {
   LockOutlined,
   LoginOutlined,
   MailOutlined,
+  MobileOutlined,
   SafetyCertificateOutlined,
+  SendOutlined,
   UserOutlined,
 } from '@ant-design/icons'
 import { useEffect, useRef, useState } from 'react'
@@ -35,6 +38,10 @@ import {
 } from '../../lib/auth'
 import type { OAuthProviderInfo } from '../../lib/types'
 
+const PHONE_PATTERN = /^(?:(?:\+?86)|(?:0086))?1[3-9]\d{9}$/
+
+type ResetMode = 'email' | 'phone'
+
 function normalizeRedirectPath(path: string | null | undefined): string | null {
   if (!path || !path.startsWith('/') || path.startsWith('//')) {
     return null
@@ -45,7 +52,7 @@ function normalizeRedirectPath(path: string | null | undefined): string | null {
 export default function LoginPage() {
   const navigate = useNavigate()
   const location = useLocation()
-  const { exchangeOAuthTicket, login, verifyTwoFactorLogin, loading, isAuthenticated, sendPasswordResetLink } = useAuth()
+  const { exchangeOAuthTicket, login, verifyTwoFactorLogin, loading, isAuthenticated, sendPasswordResetLink, sendPhonePasswordResetCode, resetPasswordByPhone } = useAuth()
   const { turnstile } = useRuntimeConfig()
   const { message } = App.useApp()
   const turnstileSiteKey = turnstile.siteKey
@@ -53,7 +60,9 @@ export default function LoginPage() {
 
   const [form] = Form.useForm<{ username: string; password: string }>()
   const [twoFactorForm] = Form.useForm<{ code: string }>()
-  const [resetForm] = Form.useForm<{ email: string }>()
+  const [resetForm] = Form.useForm<{ email?: string; phone?: string; code?: string; newPassword?: string }>()
+  const [resetMode, setResetMode] = useState<ResetMode>('email')
+  const [resetStep, setResetStep] = useState<0 | 1>(0)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [pendingChallengeToken, setPendingChallengeToken] = useState<string | null>(null)
@@ -268,6 +277,67 @@ export default function LoginPage() {
     }
   }
 
+  const handleSendPhoneResetCode = async (phone: string) => {
+    if (turnstileEnabled && !resetTurnstileToken) {
+      const noTokenError = '请先完成机器人校验'
+      setResetError(noTokenError)
+      message.error(noTokenError)
+      return
+    }
+    if (resetCountdown > 0 || resetSending) {
+      return
+    }
+    setResetSending(true)
+    setResetError(null)
+    try {
+      await sendPhonePasswordResetCode({
+        phone,
+        turnstile_token: resetTurnstileToken ?? undefined,
+      })
+      setResetCountdown(60)
+      message.success('验证码已发送，请查看您的手机短信')
+    } catch (err) {
+      const text = resolveApiErrorMessage(err, '验证码发送失败，请稍后重试。')
+      setResetError(text)
+      message.error(text)
+    } finally {
+      setResetSending(false)
+    }
+  }
+
+  const handleResetByPhone = async (values: { phone: string; code: string; newPassword: string }) => {
+    if (turnstileEnabled && !resetTurnstileToken) {
+      const noTokenError = '请先完成机器人校验'
+      setResetError(noTokenError)
+      message.error(noTokenError)
+      return
+    }
+    setSubmitting(true)
+    setResetError(null)
+    try {
+      await resetPasswordByPhone({
+        phone: values.phone,
+        code: values.code,
+        new_password: values.newPassword,
+        turnstile_token: resetTurnstileToken ?? undefined,
+      })
+      message.success('密码重置成功，请使用新密码登录')
+      setResetOpen(false)
+      setResetMode('email')
+      setResetStep(0)
+      setResetError(null)
+      resetForm.resetFields()
+      setResetTurnstileToken(null)
+      setResetCountdown(0)
+    } catch (err) {
+      const text = resolveApiErrorMessage(err, '密码重置失败，请稍后重试。')
+      setResetError(text)
+      message.error(text)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
   if (loading) {
     return (
       <Flex
@@ -297,7 +367,7 @@ export default function LoginPage() {
               欢迎回来
             </Typography.Title>
             <Typography.Text type="secondary">
-              输入用户名或邮箱及密码以访问现代化的前端模板。
+              输入手机号、用户名或邮箱及密码登录商城。
             </Typography.Text>
           </div>
           {registerSuccess && <Alert type="success" showIcon message="注册成功，请使用新账号登录。" style={{ marginBottom: 0 }} />}
@@ -379,17 +449,17 @@ export default function LoginPage() {
                 autoComplete="on"
               >
                 <Form.Item
-                  label="用户名/邮箱"
+                  label="手机号/用户名/邮箱"
                   name="username"
                   rules={[
-                    { required: true, message: '请输入用户名或邮箱' },
-                    { min: 3, message: '用户名或邮箱至少 3 个字符' },
+                    { required: true, message: '请输入手机号、用户名或邮箱' },
+                    { min: 3, message: '账号至少 3 个字符' },
                   ]}
                 >
                   <Input
                     size="large"
                     prefix={<UserOutlined />}
-                    placeholder="请输入用户名或邮箱"
+                    placeholder="请输入手机号、用户名或邮箱"
                     autoComplete="username"
                     allowClear
                   />
@@ -474,26 +544,72 @@ export default function LoginPage() {
         onCancel={() => {
           setResetOpen(false)
           setResetError(null)
+          setResetMode('email')
+          setResetStep(0)
           resetForm.resetFields()
           setResetTurnstileToken(null)
           setResetCountdown(0)
         }}
-        onOk={() => resetForm.submit()}
-        okText="发送重置链接"
-        confirmLoading={resetSending}
-        okButtonProps={{ disabled: resetSending || resetCountdown > 0 }}
+        footer={resetMode === 'email' ? (
+          <Button
+            type="primary"
+            onClick={() => resetForm.submit()}
+            loading={resetSending}
+            disabled={resetSending || resetCountdown > 0}
+          >
+            发送重置链接
+          </Button>
+        ) : (
+          <Button
+            type="primary"
+            onClick={() => resetForm.submit()}
+            loading={submitting || resetSending}
+          >
+            {resetStep === 0 ? '下一步' : '重置密码'}
+          </Button>
+        )}
         destroyOnClose
       >
         <Space direction="vertical" size={16} style={{ width: '100%' }}>
-          <Typography.Text type="secondary">
-            我们会向你的邮箱发送一条包含重置链接的邮件。
-          </Typography.Text>
+          <Segmented
+            block
+            value={resetMode}
+            onChange={(value) => {
+              setResetMode(value as ResetMode)
+              setResetStep(0)
+              setResetError(null)
+              resetForm.resetFields()
+              setResetTurnstileToken(null)
+              setResetCountdown(0)
+            }}
+            options={[
+              { label: '邮箱找回', value: 'email' },
+              { label: '手机号找回', value: 'phone' },
+            ]}
+          />
           {resetError && <Alert type="error" showIcon message={resetError} />}
           <Form
             form={resetForm}
             layout="vertical"
             onFinish={async (values) => {
-              await handleSendResetLink(values.email)
+              if (resetMode === 'email') {
+                await handleSendResetLink(values.email ?? '')
+              } else if (resetStep === 0) {
+                const phone = values.phone ?? ''
+                try {
+                  await form.validateFields(['phone'])
+                  await handleSendPhoneResetCode(phone)
+                  setResetStep(1)
+                } catch {
+                  // 表单校验失败，展示错误
+                }
+              } else {
+                await handleResetByPhone({
+                  phone: values.phone ?? '',
+                  code: values.code ?? '',
+                  newPassword: values.newPassword ?? '',
+                })
+              }
             }}
             requiredMark={false}
           >
@@ -507,20 +623,75 @@ export default function LoginPage() {
                 />
               </Form.Item>
             ) : null}
-            <Form.Item
-              label="邮箱"
-              name="email"
-              rules={[
-                { required: true, message: '请输入邮箱地址' },
-                { type: 'email', message: '请输入正确的邮箱格式' },
-              ]}
-            >
-              <Input
-                prefix={<MailOutlined />}
-                placeholder="请输入注册邮箱"
-                allowClear
-              />
-            </Form.Item>
+            {resetMode === 'email' ? (
+              <Form.Item
+                label="邮箱"
+                name="email"
+                rules={[
+                  { required: true, message: '请输入邮箱地址' },
+                  { type: 'email', message: '请输入正确的邮箱格式' },
+                ]}
+              >
+                <Input prefix={<MailOutlined />} placeholder="请输入注册邮箱" allowClear />
+              </Form.Item>
+            ) : (
+              <>
+                <Form.Item
+                  label="手机号"
+                  name="phone"
+                  rules={[
+                    { required: true, message: '请输入手机号' },
+                    { pattern: PHONE_PATTERN, message: '请输入正确的手机号格式' },
+                  ]}
+                >
+                  <Input prefix={<MobileOutlined />} placeholder="请输入注册手机号" allowClear />
+                </Form.Item>
+                {resetStep === 1 && (
+                  <>
+                    <Form.Item label="验证码">
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                        <div style={{ flex: 1 }}>
+                          <Form.Item
+                            name="code"
+                            noStyle
+                            rules={[
+                              { required: true, message: '请输入验证码' },
+                              { len: 6, message: '验证码为6位数字' },
+                            ]}
+                          >
+                            <Input placeholder="请输入验证码" />
+                          </Form.Item>
+                        </div>
+                        <Button
+                          icon={<SendOutlined />}
+                          onClick={async () => {
+                            const phone = resetForm.getFieldValue('phone')
+                            if (phone) {
+                              await handleSendPhoneResetCode(phone)
+                            }
+                          }}
+                          loading={resetSending}
+                          disabled={resetSending || resetCountdown > 0}
+                          style={{ width: 112, flex: '0 0 112px' }}
+                        >
+                          {resetCountdown > 0 ? `${resetCountdown}s` : '发送'}
+                        </Button>
+                      </div>
+                    </Form.Item>
+                    <Form.Item
+                      label="新密码"
+                      name="newPassword"
+                      rules={[
+                        { required: true, message: '请输入新密码' },
+                        { min: 8, message: '密码至少 8 个字符' },
+                      ]}
+                    >
+                      <Input.Password prefix={<LockOutlined />} placeholder="请输入新密码" autoComplete="new-password" />
+                    </Form.Item>
+                  </>
+                )}
+              </>
+            )}
             {resetCountdown > 0 && (
               <Typography.Text type="secondary">
                 {resetCountdown}s 后可再次发送

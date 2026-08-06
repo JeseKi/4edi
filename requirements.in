@@ -22,3 +22,6 @@ types-python-jose
 alembic
 boto3
 python-multipart
+wechatpayv3
+cryptography
+tencentcloud-sdk-python

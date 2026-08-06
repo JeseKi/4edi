@@ -9,11 +9,14 @@ from src.server.mail import MailDeliveryExecutor, get_mail_delivery_executor
 from .. import service
 from ..models import User
 from ..schemas import (
+    PhoneRegisterWithCode,
+    PhoneVerificationCodeRequest,
     UserCreate,
     UserProfile,
     UserRegisterWithCode,
     VerificationCodeRequest,
 )
+from ..service.sms import normalize_mainland_phone
 from .base import router
 
 
@@ -178,5 +181,92 @@ async def register_user_with_code(
         action="auth.user.register",
         user=new_user,
         detail={"registration_method": "email_verification_code"},
+    )
+    return new_user
+
+
+@router.post(
+    "/send-phone-verification-code",
+    summary="发送手机验证码",
+    responses={
+        200: {"description": "验证码发送成功"},
+        429: {"description": "发送过于频繁"},
+        500: {"description": "验证码发送失败"},
+    },
+)
+async def send_phone_verification_code(
+    request: Request,
+    payload: PhoneVerificationCodeRequest,
+):
+    normalized_phone = normalize_mainland_phone(payload.phone)
+    audit_service.attach_audit_context(
+        request.state,
+        action="auth.phone_verification.request",
+        resource_type="auth",
+        target_summary="请求手机验证码",
+        actor_identifier=audit_service.mask_identifier(normalized_phone),
+    )
+    await service.verify_turnstile_token(
+        request=request,
+        token=payload.turnstile_token,
+        action="auth_send_phone_verification_code",
+    )
+
+    try:
+        service.send_phone_verification_code(normalized_phone)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)
+        )
+    except RuntimeError:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="验证码发送失败"
+        )
+    return {"message": "验证码已发送"}
+
+
+@router.post(
+    "/register-with-phone-code",
+    response_model=UserProfile,
+    status_code=status.HTTP_201_CREATED,
+    summary="手机号注册用户",
+    description="使用手机短信验证码创建新用户账户",
+    responses={
+        201: {"description": "用户创建成功"},
+        400: {"description": "手机号已注册 / 验证码无效"},
+    },
+)
+async def register_user_with_phone_code(
+    request: Request,
+    user_data: PhoneRegisterWithCode,
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    normalized_phone = normalize_mainland_phone(user_data.phone)
+    audit_service.attach_audit_context(
+        request.state,
+        action="auth.user.register",
+        resource_type="user",
+        target_summary=f"手机号 {audit_service.mask_identifier(normalized_phone)}",
+        actor_identifier=audit_service.mask_identifier(normalized_phone),
+        detail={"registration_method": "phone_verification_code"},
+    )
+    await service.verify_turnstile_token(
+        request=request,
+        token=user_data.turnstile_token,
+        action="auth_register_with_phone_code",
+    )
+
+    def _register(db) -> UserProfile:
+        new_user = service.register_with_phone(
+            db, normalized_phone, user_data.password, user_data.code
+        )
+        return UserProfile.model_validate(new_user)
+
+    new_user = await database_executor.run(_register)
+    audit_service.attach_user_audit_context(
+        request.state,
+        action="auth.user.register",
+        user=new_user,
+        detail={"registration_method": "phone_verification_code"},
     )
     return new_user

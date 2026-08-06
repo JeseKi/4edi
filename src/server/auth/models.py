@@ -36,6 +36,9 @@ class User(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
     email: Mapped[str] = mapped_column(String(120), unique=True, nullable=False)
+    phone: Mapped[Optional[str]] = mapped_column(
+        String(32), unique=True, index=True, nullable=True, default=None
+    )
     password_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     scope_overrides: Mapped[Optional[str]] = mapped_column(Text, default=None)
     name: Mapped[Optional[str]] = mapped_column(String(100), default=None)

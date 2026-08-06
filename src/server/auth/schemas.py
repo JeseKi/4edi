@@ -40,6 +40,7 @@ class UserProfile(BaseModel):
     id: int
     username: str
     email: EmailStr
+    phone: Optional[str] = Field(default=None)
     name: Optional[str] = Field(default=None)
     role: UserRole
     status: UserStatus
@@ -124,6 +125,25 @@ class PasswordChange(BaseModel):
 
 class VerificationCodeRequest(BaseModel):
     email: EmailStr
+    turnstile_token: str | None = Field(default=None, min_length=1, max_length=2048)
+
+
+class PhoneVerificationCodeRequest(BaseModel):
+    phone: str = Field(..., min_length=5, max_length=20)
+    turnstile_token: str | None = Field(default=None, min_length=1, max_length=2048)
+
+
+class PhoneRegisterWithCode(BaseModel):
+    phone: str = Field(..., min_length=5, max_length=20)
+    code: str = Field(..., min_length=6, max_length=6)
+    password: str = Field(..., min_length=8)
+    turnstile_token: str | None = Field(default=None, min_length=1, max_length=2048)
+
+
+class PhonePasswordResetRequest(BaseModel):
+    phone: str = Field(..., min_length=5, max_length=20)
+    code: str = Field(..., min_length=6, max_length=6)
+    new_password: str = Field(..., min_length=8)
     turnstile_token: str | None = Field(default=None, min_length=1, max_length=2048)
 
 

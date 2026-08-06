@@ -29,6 +29,7 @@ def test_all_expands_to_non_development_features_outside_dev() -> None:
         "oauth-login",
         "oauth-provider",
         "notifications",
+        "mall",
     }
 
 
@@ -65,4 +66,5 @@ def test_frontend_config_exposes_the_resolved_web_surface(test_client) -> None:
         "oauth-login",
         "oauth-provider",
         "notifications",
+        "mall",
     }

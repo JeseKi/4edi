@@ -13,6 +13,7 @@ from src.server.mail import MailAddress, MailContent, send_mail
 
 from .mail_utils import is_mail_configured
 from .mail_templates import build_auth_email_html
+from .sms import deliver_phone_verification_code
 from .tokens import generate_reset_token
 
 
@@ -101,3 +102,39 @@ def verify_password_reset_token(token: str) -> str | None:
     email = cast(str, stored_data["email"])
     password_reset_tokens.pop(token, None)
     return email
+
+
+def send_phone_password_reset_code(phone: str) -> str:
+    """生成并发送手机密码重置验证码。"""
+    from .verification import (
+        VERIFICATION_CODE_EXPIRES_MINUTES,
+        VERIFICATION_CODE_SEND_COOLDOWN_SECONDS,
+        generate_verification_code,
+        verification_codes,
+    )
+
+    now = datetime.now(timezone.utc)
+    existing_data = verification_codes.get(phone)
+    if existing_data is not None:
+        last_sent = existing_data.get("sent_at")
+        if isinstance(last_sent, datetime):
+            elapsed_seconds = (now - last_sent).total_seconds()
+            if elapsed_seconds < VERIFICATION_CODE_SEND_COOLDOWN_SECONDS:
+                retry_after_seconds = int(
+                    VERIFICATION_CODE_SEND_COOLDOWN_SECONDS - elapsed_seconds
+                )
+                retry_after_seconds = max(retry_after_seconds, 1)
+                raise ValueError(f"发送过于频繁，请 {retry_after_seconds} 秒后再试")
+
+    code = generate_verification_code()
+    expiry = now + timedelta(minutes=VERIFICATION_CODE_EXPIRES_MINUTES)
+    verification_codes[phone] = {
+        "code": code,
+        "expiry": expiry,
+        "sent_at": now,
+        "attempts": 0,
+    }
+    deliver_phone_verification_code(
+        phone, code, expires_minutes=VERIFICATION_CODE_EXPIRES_MINUTES
+    )
+    return code

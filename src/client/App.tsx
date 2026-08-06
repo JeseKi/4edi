@@ -15,6 +15,22 @@ import OAuthDeviceAuthorizePage from './pages/auth/OAuthDeviceAuthorizePage'
 import LandingPage from './pages/landing/LandingPage'
 import NotificationInboxPage from './pages/notifications/NotificationInboxPage'
 import NotificationDetailPage from './pages/notifications/NotificationDetailPage'
+import MallLayout from './components/mall/MallLayout'
+import MallHomePage from './pages/mall/HomePage'
+import GoodsDetailPage from './pages/mall/GoodsDetailPage'
+import CartPage from './pages/mall/CartPage'
+import CheckoutPage from './pages/mall/CheckoutPage'
+import OrdersPage from './pages/mall/OrdersPage'
+import OrderDetailPage from './pages/mall/OrderDetailPage'
+import ChatPage from './pages/mall/ChatPage'
+import SellerLayout from './components/mall/SellerLayout'
+import ShopManagePage from './pages/mall/seller/ShopManagePage'
+import GoodsManagePage from './pages/mall/seller/GoodsManagePage'
+import OrdersManagePage from './pages/mall/seller/OrdersManagePage'
+import WalletPage from './pages/mall/seller/WalletPage'
+import SellerChatPage from './pages/mall/seller/SellerChatPage'
+import ShopReviewPage from './pages/mall/admin/ShopReviewPage'
+import WithdrawReviewPage from './pages/mall/admin/WithdrawReviewPage'
 import { AuthProvider, RequireAdmin, RequireAuth } from './providers/AuthProvider'
 import { RuntimeConfigProvider } from './providers/RuntimeConfigProvider'
 import ThemeToggle from './components/theme/ThemeToggle'
@@ -62,6 +78,32 @@ function AppRoutes() {
             <Route path="/admin" element={<RequireAdmin><AdminManagementPage /></RequireAdmin>} />
           )}
         </Route>
+        {hasFeature('mall') && (
+          <Route element={<MallLayout />}>
+            <Route path="/mall" element={<MallHomePage />} />
+            <Route path="/mall/goods/:goodsId" element={<GoodsDetailPage />} />
+            <Route path="/mall/cart" element={<RequireAuth><CartPage /></RequireAuth>} />
+            <Route path="/mall/checkout" element={<RequireAuth><CheckoutPage /></RequireAuth>} />
+            <Route path="/mall/orders" element={<RequireAuth><OrdersPage /></RequireAuth>} />
+            <Route path="/mall/orders/:orderNo" element={<RequireAuth><OrderDetailPage /></RequireAuth>} />
+            <Route path="/mall/chat" element={<RequireAuth><ChatPage /></RequireAuth>} />
+          </Route>
+        )}
+        {hasFeature('mall') && (
+          <Route element={<RequireAuth><SellerLayout /></RequireAuth>}>
+            <Route path="/mall/seller/shop" element={<ShopManagePage />} />
+            <Route path="/mall/seller/goods" element={<GoodsManagePage />} />
+            <Route path="/mall/seller/orders" element={<OrdersManagePage />} />
+            <Route path="/mall/seller/wallet" element={<WalletPage />} />
+            <Route path="/mall/seller/chat" element={<SellerChatPage />} />
+          </Route>
+        )}
+        {hasFeature('mall') && (
+          <Route path="/mall/admin/shops" element={<RequireAdmin><ShopReviewPage /></RequireAdmin>} />
+        )}
+        {hasFeature('mall') && (
+          <Route path="/mall/admin/withdrawals" element={<RequireAdmin><WithdrawReviewPage /></RequireAdmin>} />
+        )}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
       <ThemeToggle />

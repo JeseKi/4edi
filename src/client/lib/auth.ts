@@ -13,6 +13,9 @@ import type {
   PasswordChangeConfirmPayload,
   PasswordResetLinkPayload,
   PasswordResetWithTokenPayload,
+  PhonePasswordResetPayload,
+  PhoneRegisterWithCodePayload,
+  PhoneVerificationCodePayload,
   RegisterWithCodePayload,
   TokenResponse,
   TwoFactorDisablePayload,
@@ -95,6 +98,26 @@ export async function sendPasswordResetLink(payload: PasswordResetLinkPayload): 
 
 export async function registerWithCode(payload: RegisterWithCodePayload): Promise<UserProfile> {
   const { data } = await api.post<UserProfile>('/auth/register-with-code', payload)
+  return data
+}
+
+export async function sendPhoneVerificationCode(payload: PhoneVerificationCodePayload): Promise<{ message: string }> {
+  const { data } = await api.post<{ message: string }>('/auth/send-phone-verification-code', payload)
+  return data
+}
+
+export async function registerWithPhoneCode(payload: PhoneRegisterWithCodePayload): Promise<UserProfile> {
+  const { data } = await api.post<UserProfile>('/auth/register-with-phone-code', payload)
+  return data
+}
+
+export async function sendPhonePasswordResetCode(payload: PhoneVerificationCodePayload): Promise<{ message: string }> {
+  const { data } = await api.post<{ message: string }>('/auth/forgot-password/phone-code', payload)
+  return data
+}
+
+export async function resetPasswordByPhone(payload: PhonePasswordResetPayload): Promise<{ message: string }> {
+  const { data } = await api.post<{ message: string }>('/auth/forgot-password/phone-reset', payload)
   return data
 }
 

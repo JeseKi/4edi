@@ -115,6 +115,7 @@ def test_database_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
     import src.server.task_runtime.models  # noqa: F401
     import src.server.files.models  # noqa: F401
     import src.server.notifications.models  # noqa: F401
+    import src.server.mall.models  # noqa: F401
 
     try:
         Base.metadata.create_all(bind=engine)
@@ -172,6 +173,10 @@ def test_client(test_db_session: Session) -> Iterator[SyncASGITestClient]:
     from src.server.example_module.service import EXAMPLE_ASYNC_TASK
     from src.server.files.service import DELETE_FILE_OBJECT, EXPIRE_PENDING_FILE
     from src.server.mail import MailDeliveryExecutor
+    from src.server.mall.service import (
+        MALL_ORDER_AUTO_CONFIRM,
+        MALL_ORDER_PAYMENT_TIMEOUT,
+    )
     from src.server.platform.runtime import ApplicationRuntime
     from src.server.config import global_config
     from src.server.task_runtime import TaskRuntime
@@ -199,11 +204,18 @@ def test_client(test_db_session: Session) -> Iterator[SyncASGITestClient]:
     )
     mail_delivery_executor = MailDeliveryExecutor(max_workers=2, queue_timeout_seconds=30)
     task_runtime = TaskRuntime(
-        definitions=(EXAMPLE_ASYNC_TASK, EXPIRE_PENDING_FILE, DELETE_FILE_OBJECT), session_runner=run_test_task_db
+        definitions=(
+            EXAMPLE_ASYNC_TASK,
+            EXPIRE_PENDING_FILE,
+            DELETE_FILE_OBJECT,
+            MALL_ORDER_PAYMENT_TIMEOUT,
+            MALL_ORDER_AUTO_CONFIRM,
+        ),
+        session_runner=run_test_task_db,
     )
     app.state.runtime = ApplicationRuntime(
         settings=global_config,
-        enabled_features=frozenset({"auth", "admin", "audit", "oauth-login", "oauth-provider", "files", "example", "notifications"}),
+        enabled_features=frozenset({"auth", "admin", "audit", "oauth-login", "oauth-provider", "files", "example", "notifications", "mall"}),
         database_executor=database_executor,
         mail_delivery_executor=mail_delivery_executor,
         task_runtime=task_runtime,

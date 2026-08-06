@@ -20,6 +20,7 @@ from .password_reset import (
     password_reset_request_log,
     password_reset_tokens,
     send_password_reset_link,
+    send_phone_password_reset_code,
     verify_password_reset_token,
 )
 from .login_challenges import (
@@ -103,9 +104,13 @@ from .two_factor import (
 )
 from .users import (
     authenticate_user,
+    create_phone_placeholder_email,
+    create_unique_random_username,
     create_user,
+    get_user_by_phone,
     get_user_by_username,
     is_user_disabled,
+    register_with_phone,
     update_user,
 )
 from .verification import (
@@ -113,6 +118,7 @@ from .verification import (
     VERIFICATION_CODE_MAX_ATTEMPTS,
     VERIFICATION_CODE_SEND_COOLDOWN_SECONDS,
     generate_verification_code,
+    send_phone_verification_code,
     send_verification_code,
     verification_codes,
     verify_code,
@@ -164,6 +170,8 @@ __all__ = [
     "LoginChallengeError",
     "generate_verification_code",
     "send_verification_code",
+    "send_phone_verification_code",
+    "send_phone_password_reset_code",
     "verify_code",
     "generate_reset_token",
     "get_token_version",
@@ -172,7 +180,11 @@ __all__ = [
     "send_password_change_link",
     "verify_password_change_token",
     "get_user_by_username",
+    "get_user_by_phone",
     "authenticate_user",
+    "register_with_phone",
+    "create_unique_random_username",
+    "create_phone_placeholder_email",
     "build_token_payload",
     "create_access_token",
     "create_refresh_token",
