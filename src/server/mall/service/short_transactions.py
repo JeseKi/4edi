@@ -127,7 +127,17 @@ def resolve_seller_shop(db: Session, principal: AuthenticatedPrincipal, shop_id:
 
 
 def apply_shop(
-    db: Session, principal: AuthenticatedPrincipal, *, name: str, description: str | None, avatar: str | None
+    db: Session,
+    principal: AuthenticatedPrincipal,
+    *,
+    name: str,
+    description: str | None,
+    avatar: str | None,
+    real_name: str,
+    identity_number: str,
+    business_license_asset_id: str,
+    identity_front_asset_id: str,
+    identity_back_asset_id: str,
 ) -> Shop:
     shop_dao = ShopDAO(db)
     existing = shop_dao.get_by_owner(principal.user_id)
@@ -135,7 +145,15 @@ def apply_shop(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="已申请过店铺")
     try:
         return shop_dao.create(
-            owner_user_id=principal.user_id, name=name, description=description, avatar=avatar
+            owner_user_id=principal.user_id,
+            name=name,
+            description=description,
+            avatar=avatar,
+            real_name=real_name,
+            identity_number=identity_number,
+            business_license_asset_id=business_license_asset_id,
+            identity_front_asset_id=identity_front_asset_id,
+            identity_back_asset_id=identity_back_asset_id,
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
@@ -227,6 +245,18 @@ def admin_close_shop(db: Session, shop_id: int) -> Shop:
     db.query(Goods).filter(Goods.shop_id == shop_id, Goods.status == GoodsStatus.ON).update(
         {Goods.status: GoodsStatus.OFF}, synchronize_session=False
     )
+    return shop
+
+
+def admin_reopen_shop(db: Session, shop_id: int) -> Shop:
+    """恢复已关闭店铺的经营资格；商品保持下架，需商家自行确认后上架。"""
+    shop = ShopDAO(db).lock(shop_id)
+    if shop is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="店铺不存在")
+    if shop.status != ShopStatus.CLOSED:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅可开启已关闭店铺")
+    shop.status = ShopStatus.APPROVED
+    shop.closed_at = None
     return shop
 
 

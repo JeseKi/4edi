@@ -85,7 +85,19 @@ class CategoryDAO(BaseDAO):
 
 
 class ShopDAO(BaseDAO):
-    def create(self, *, owner_user_id: int, name: str, description: str | None, avatar: str | None) -> Shop:
+    def create(
+        self,
+        *,
+        owner_user_id: int,
+        name: str,
+        description: str | None,
+        avatar: str | None,
+        real_name: str,
+        identity_number: str,
+        business_license_asset_id: str,
+        identity_front_asset_id: str,
+        identity_back_asset_id: str,
+    ) -> Shop:
         exists = self.db_session.query(Shop).filter(Shop.owner_user_id == owner_user_id).first()
         if exists:
             raise ValueError("每个用户只能申请一家店铺")
@@ -94,6 +106,11 @@ class ShopDAO(BaseDAO):
             name=name,
             description=description,
             avatar=avatar,
+            real_name=real_name,
+            identity_number=identity_number,
+            business_license_asset_id=business_license_asset_id,
+            identity_front_asset_id=identity_front_asset_id,
+            identity_back_asset_id=identity_back_asset_id,
             status=ShopStatus.PENDING,
         )
         self.db_session.add(shop)

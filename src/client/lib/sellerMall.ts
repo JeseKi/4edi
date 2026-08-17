@@ -46,6 +46,11 @@ export const applyMallShop = async (payload: {
   name: string
   description?: string
   avatar?: string
+  real_name: string
+  identity_number: string
+  business_license_asset_id: string
+  identity_front_asset_id: string
+  identity_back_asset_id: string
 }): Promise<MallShop> => (await api.post<MallShop>('/mall/seller/shop/apply', payload)).data
 
 export const updateMallShop = async (payload: {
@@ -53,6 +58,9 @@ export const updateMallShop = async (payload: {
   description?: string
   avatar?: string
 }): Promise<MallShop> => (await api.put<MallShop>('/mall/seller/shop', payload)).data
+
+export const reopenAdminShop = async (shopId: number): Promise<MallShop> =>
+  (await api.post<MallShop>(`/mall/admin/shops/${shopId}/reopen`)).data
 
 // ---------------------------------------------------------------------------
 // 商家：商品

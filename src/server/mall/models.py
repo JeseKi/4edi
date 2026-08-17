@@ -187,6 +187,11 @@ class Shop(Base):
     name: Mapped[str] = mapped_column(String(100), nullable=False)
     avatar: Mapped[Optional[str]] = mapped_column(String(500), default=None)
     description: Mapped[Optional[str]] = mapped_column(Text, default=None)
+    real_name: Mapped[Optional[str]] = mapped_column(String(50), default=None)
+    identity_number: Mapped[Optional[str]] = mapped_column(String(32), default=None)
+    business_license_asset_id: Mapped[Optional[str]] = mapped_column(String(500), default=None)
+    identity_front_asset_id: Mapped[Optional[str]] = mapped_column(String(500), default=None)
+    identity_back_asset_id: Mapped[Optional[str]] = mapped_column(String(500), default=None)
     status: Mapped[ShopStatus] = mapped_column(
         SQLEnum(ShopStatus), nullable=False, default=ShopStatus.PENDING
     )

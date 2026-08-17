@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { App, Alert, Button, Descriptions, Form, Input, Modal, Spin, Tag } from 'antd'
+import { App, Alert, Button, Descriptions, Form, Input, Modal, Space, Spin, Tag } from 'antd'
 import { applyMallShop, getMyMallShop, updateMallShop } from '../../../lib/sellerMall'
+import FileUpload from '../../../components/files/FileUpload'
 import { resolveApiErrorMessage } from '../../../lib/error'
 import type { MallShop } from '../../../lib/types'
 
@@ -19,6 +20,7 @@ export default function ShopManagePage() {
   const [loading, setLoading] = useState(true)
   const [editOpen, setEditOpen] = useState(false)
   const [saving, setSaving] = useState(false)
+  const [uploadedDocuments, setUploadedDocuments] = useState<Record<string, string>>({})
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -52,6 +54,11 @@ export default function ShopManagePage() {
     }
   }
 
+  const recordDocumentUpload = (field: string, assetId: string) => {
+    form.setFieldValue(field, assetId)
+    setUploadedDocuments((current) => ({ ...current, [field]: assetId }))
+  }
+
   const saveEdit = async () => {
     const values = await form.validateFields()
     setSaving(true)
@@ -81,7 +88,7 @@ export default function ShopManagePage() {
           申请开店
         </h3>
         <p className="text-xs mb-4" style={{ color: '#999' }}>
-          提交申请后由平台管理员审核，审核通过后即可发布商品。需缴纳入驻保证金（按平台配置）。
+          提交身份与经营材料后由平台管理员审核，审核通过后即可发布商品。需缴纳入驻保证金（按平台配置）。
         </p>
         <Form form={form} layout="vertical">
           <Form.Item name="name" label="店铺名称" rules={[{ required: true, message: '请输入店铺名称' }, { max: 50 }]}>
@@ -90,6 +97,27 @@ export default function ShopManagePage() {
           <Form.Item name="description" label="店铺简介" rules={[{ max: 300 }]}>
             <Input.TextArea rows={3} placeholder="介绍一下你的店铺" />
           </Form.Item>
+          <Form.Item name="real_name" label="姓名" rules={[{ required: true, message: '请输入姓名' }, { max: 50 }]}>
+            <Input placeholder="请输入经营者姓名" />
+          </Form.Item>
+          <Form.Item name="identity_number" label="身份证号" rules={[{ required: true, message: '请输入身份证号' }, { min: 15, max: 32 }]}>
+            <Input placeholder="请输入身份证号码" />
+          </Form.Item>
+          {[
+            ['business_license_asset_id', '营业执照'],
+            ['identity_front_asset_id', '身份证正面'],
+            ['identity_back_asset_id', '身份证反面'],
+          ].map(([field, label]) => (
+            <Form.Item key={field} label={label} required>
+              <Form.Item name={field} noStyle rules={[{ required: true, message: `请上传${label}` }]}>
+                <Input type="hidden" />
+              </Form.Item>
+              <Space>
+                <FileUpload accept="image/*" disabled={saving} onUploaded={(asset) => recordDocumentUpload(field, asset.id)} />
+                {uploadedDocuments[field] && <Tag color="green">已上传</Tag>}
+              </Space>
+            </Form.Item>
+          ))}
           <Button type="primary" loading={saving} onClick={apply} style={{ background: '#F31947' }}>
             提交申请
           </Button>
@@ -124,6 +152,8 @@ export default function ShopManagePage() {
       <Descriptions column={1} size="middle">
         <Descriptions.Item label="店铺名称">{shop?.name}</Descriptions.Item>
         <Descriptions.Item label="店铺简介">{shop?.description || '-'}</Descriptions.Item>
+        <Descriptions.Item label="经营者姓名">{shop?.real_name || '-'}</Descriptions.Item>
+        <Descriptions.Item label="身份证号">{shop?.identity_number || '-'}</Descriptions.Item>
         <Descriptions.Item label="入驻保证金">
           ¥{((shop?.deposit_fen ?? 0) / 100).toFixed(2)}
         </Descriptions.Item>

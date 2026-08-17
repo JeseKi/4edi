@@ -275,8 +275,16 @@ export default function SellerGoodsPage() {
           <div className="text-sm font-medium mb-2" style={{ color: '#333' }}>
             规格（格式：颜色:红色; 尺码:41）
           </div>
+          {skus.length > 0 && (
+            <div className="grid grid-cols-[2fr_1fr_1fr_auto] gap-2 mb-1 px-1 text-xs" style={{ color: '#666' }}>
+              <span>规格</span>
+              <span>销售价（分）</span>
+              <span>库存</span>
+              <span>操作</span>
+            </div>
+          )}
           {skus.map((row, index) => (
-            <div key={row.key} className="flex gap-2 mb-2">
+            <div key={row.key} className="grid grid-cols-[2fr_1fr_1fr_auto] gap-2 mb-2">
               <Input
                 placeholder="规格，如 颜色:红色"
                 value={row.specs}
@@ -284,13 +292,15 @@ export default function SellerGoodsPage() {
                 style={{ flex: 2 }}
               />
               <InputNumber
-                placeholder="价格(分)"
+                aria-label="销售价（分）"
+                placeholder="销售价（分）"
                 min={0}
                 value={row.price_fen}
                 onChange={(v) => setSkus((list) => list.map((r, i) => (i === index ? { ...r, price_fen: v ?? 0 } : r)))}
                 style={{ flex: 1 }}
               />
               <InputNumber
+                aria-label="库存"
                 placeholder="库存"
                 min={0}
                 value={row.stock}

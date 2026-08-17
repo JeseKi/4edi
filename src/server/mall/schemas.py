@@ -58,6 +58,11 @@ class ShopApply(BaseModel):
     name: str = Field(..., min_length=2, max_length=100)
     description: str | None = Field(default=None, max_length=500)
     avatar: str | None = Field(default=None, max_length=500)
+    real_name: str = Field(..., min_length=2, max_length=50)
+    identity_number: str = Field(..., min_length=15, max_length=32)
+    business_license_asset_id: str = Field(..., min_length=1, max_length=500)
+    identity_front_asset_id: str = Field(..., min_length=1, max_length=500)
+    identity_back_asset_id: str = Field(..., min_length=1, max_length=500)
 
 
 class ShopUpdate(BaseModel):
@@ -72,6 +77,11 @@ class ShopOut(BaseModel):
     name: str
     avatar: str | None
     description: str | None
+    real_name: str | None
+    identity_number: str | None
+    business_license_asset_id: str | None
+    identity_front_asset_id: str | None
+    identity_back_asset_id: str | None
     status: ShopStatus
     reject_reason: str | None
     deposit_fen: int

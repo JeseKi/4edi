@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { App, Button, Descriptions, Form, Input, Modal, Popconfirm, Table, Tabs, Tag } from 'antd'
-import { closeAdminShop, listAdminShops, reviewAdminShop } from '../../../lib/sellerMall'
+import { App, Button, Descriptions, Form, Image, Input, Modal, Popconfirm, Table, Tabs, Tag } from 'antd'
+import { closeAdminShop, listAdminShops, reopenAdminShop, reviewAdminShop } from '../../../lib/sellerMall'
+import api from '../../../lib/api'
 import { resolveApiErrorMessage } from '../../../lib/error'
 import type { MallShop, MallShopStatus } from '../../../lib/types'
 
@@ -30,6 +31,7 @@ export default function ShopReviewPage() {
   const [reviewTarget, setReviewTarget] = useState<MallShop | null>(null)
   const [reviewApproved, setReviewApproved] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const [documentPreview, setDocumentPreview] = useState<{ title: string; url: string } | null>(null)
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -82,6 +84,31 @@ export default function ShopReviewPage() {
     }
   }
 
+  const reopenShop = async (shop: MallShop) => {
+    try {
+      await reopenAdminShop(shop.id)
+      message.success('店铺已开启；商品仍保持下架，需商家自行上架')
+      load()
+    } catch (err) {
+      message.error(resolveApiErrorMessage(err, '开启失败'))
+    }
+  }
+
+  const previewDocument = async (title: string, assetId: string | null) => {
+    if (!assetId) return
+    try {
+      const { data } = await api.get<Blob>(`/files/${assetId}/download`, { responseType: 'blob' })
+      setDocumentPreview({ title, url: URL.createObjectURL(data) })
+    } catch (err) {
+      message.error(resolveApiErrorMessage(err, '材料加载失败'))
+    }
+  }
+
+  const closeDocumentPreview = () => {
+    if (documentPreview) URL.revokeObjectURL(documentPreview.url)
+    setDocumentPreview(null)
+  }
+
   const columns = [
     { title: '店铺名称', dataIndex: 'name', key: 'name' },
     { title: '店主 ID', dataIndex: 'owner_user_id', key: 'owner_user_id' },
@@ -124,7 +151,14 @@ export default function ShopReviewPage() {
               </Button>
             </Popconfirm>
           )}
-          {(record.status === 'rejected' || record.status === 'closed') && (
+          {record.status === 'closed' && (
+            <Popconfirm title="开启店铺后，商品仍保持下架，确定？" onConfirm={() => reopenShop(record)}>
+              <Button size="small" type="primary">
+                开启店铺
+              </Button>
+            </Popconfirm>
+          )}
+          {record.status === 'rejected' && (
             <span className="text-xs" style={{ color: '#999' }}>
               {record.reject_reason || '-'}
             </span>
@@ -154,6 +188,21 @@ export default function ShopReviewPage() {
         expandable={{
           expandedRowRender: (record: MallShop) => (
             <Descriptions size="small" column={1}>
+              <Descriptions.Item label="经营者姓名">{record.real_name || '-'}</Descriptions.Item>
+              <Descriptions.Item label="身份证号">{record.identity_number || '-'}</Descriptions.Item>
+              <Descriptions.Item label="审核材料">
+                <div className="flex flex-wrap gap-2">
+                  <Button size="small" disabled={!record.business_license_asset_id} onClick={() => void previewDocument('营业执照', record.business_license_asset_id)}>
+                    营业执照
+                  </Button>
+                  <Button size="small" disabled={!record.identity_front_asset_id} onClick={() => void previewDocument('身份证正面', record.identity_front_asset_id)}>
+                    身份证正面
+                  </Button>
+                  <Button size="small" disabled={!record.identity_back_asset_id} onClick={() => void previewDocument('身份证反面', record.identity_back_asset_id)}>
+                    身份证反面
+                  </Button>
+                </div>
+              </Descriptions.Item>
               <Descriptions.Item label="驳回原因">{record.reject_reason || '-'}</Descriptions.Item>
               <Descriptions.Item label="审核通过时间">{record.approved_at || '-'}</Descriptions.Item>
             </Descriptions>
@@ -182,6 +231,10 @@ export default function ShopReviewPage() {
             </Form.Item>
           </Form>
         )}
+      </Modal>
+
+      <Modal title={documentPreview?.title} open={documentPreview != null} footer={null} onCancel={closeDocumentPreview} width={720}>
+        {documentPreview && <Image src={documentPreview.url} alt={documentPreview.title} style={{ width: '100%' }} />}
       </Modal>
     </div>
   )

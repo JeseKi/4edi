@@ -109,6 +109,9 @@ export default function MallLayout() {
               <Link to="/mall/chat" className="hover:opacity-80">
                 在线客服
               </Link>
+              <Link to="/mall/seller/shop" className="hover:opacity-80">
+                申请开店
+              </Link>
               <Badge count={cartCount} size="small" color={MALL_PRIMARY}>
                 <Button
                   type="text"

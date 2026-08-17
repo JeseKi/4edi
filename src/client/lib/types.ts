@@ -500,6 +500,11 @@ export interface MallShopPublic {
 
 export interface MallShop extends MallShopPublic {
   owner_user_id: number
+  real_name: string | null
+  identity_number: string | null
+  business_license_asset_id: string | null
+  identity_front_asset_id: string | null
+  identity_back_asset_id: string | null
   status: MallShopStatus
   reject_reason: string | null
   deposit_fen: number

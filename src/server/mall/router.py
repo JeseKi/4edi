@@ -1237,6 +1237,11 @@ async def apply_shop(
             name=payload.name,
             description=payload.description,
             avatar=payload.avatar,
+            real_name=payload.real_name,
+            identity_number=payload.identity_number,
+            business_license_asset_id=payload.business_license_asset_id,
+            identity_front_asset_id=payload.identity_front_asset_id,
+            identity_back_asset_id=payload.identity_back_asset_id,
         )
         from src.server.audit import service as audit_service
 
@@ -1931,6 +1936,29 @@ async def admin_close_shop(
         return ShopOut.model_validate(shop)
 
     return await database_executor.run(_close)
+
+
+@admin_router.post("/shops/{shop_id}/reopen", summary="开启店铺", response_model=ShopOut)
+async def admin_reopen_shop(
+    request: Request,
+    shop_id: int,
+    current_admin: AuthenticatedPrincipal = Security(get_current_admin),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _reopen(db):
+        shop = service.admin_reopen_shop(db, shop_id)
+        from src.server.audit import service as audit_service
+
+        audit_service.attach_audit_context(
+            request.state,
+            action="mall.shop.reopen",
+            resource_type="shop",
+            resource_id=shop.id,
+            target_summary=shop.name,
+        )
+        return ShopOut.model_validate(shop)
+
+    return await database_executor.run(_reopen)
 
 
 @admin_router.get("/refunds", summary="退款申请列表", response_model=PageOut[RefundOut])

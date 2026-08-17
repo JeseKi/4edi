@@ -48,7 +48,7 @@ def _seed_shop(test_client, *, seller_headers, admin_headers):
     """申请店铺并通过审核。返回 shop_id。"""
     resp = test_client.post(
         "/api/mall/seller/shop/apply",
-        json={"name": "评价测试店", "description": "自动化测试店铺"},
+        json={"name": "评价测试店", "description": "自动化测试店铺", "real_name": "测试商家", "identity_number": "110101199001011234", "business_license_asset_id": "license", "identity_front_asset_id": "id-front", "identity_back_asset_id": "id-back"},
         headers=seller_headers,
     )
     assert resp.status_code == 201, resp.text
@@ -386,7 +386,7 @@ def test_seller_reply_evaluation(test_client, test_db_session, init_test_databas
     )
     resp = test_client.post(
         "/api/mall/seller/shop/apply",
-        json={"name": "另一家店"},
+        json={"name": "另一家店", "real_name": "测试商家", "identity_number": "110101199001011234", "business_license_asset_id": "license", "identity_front_asset_id": "id-front", "identity_back_asset_id": "id-back"},
         headers=other_seller_headers,
     )
     assert resp.status_code == 201, resp.text
