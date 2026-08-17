@@ -7,7 +7,7 @@ from datetime import datetime, timedelta, timezone
 
 from src.server.auth import service as auth_service
 from src.server.mall import service as mall_service
-from src.server.mall.dao import OrderDAO, PaymentDAO, WalletDAO
+from src.server.mall.dao import OrderDAO, PaymentDAO, ShopDAO, WalletDAO
 from src.server.mall.models import (
     LedgerStatus,
     LedgerType,
@@ -15,8 +15,27 @@ from src.server.mall.models import (
     PaymentStatus,
 )
 from src.server.mall.schemas import OrderPreviewOut, OrderOut
+from src.server.auth.models import User
 
 from src.server.auth.tests._auth_router_helpers import _auth_headers
+
+
+def test_internal_seed_shop_can_omit_application_documents(test_db_session):
+    """种子脚本创建的官方店铺不走用户提交审核材料的接口。"""
+    user = User(username="seed-seller", email="seed-seller@example.com", name="Seed")
+    user.set_password("SeedPassword123")
+    test_db_session.add(user)
+    test_db_session.flush()
+
+    shop = ShopDAO(test_db_session).create(
+        owner_user_id=user.id,
+        name="官方示例店铺",
+        description=None,
+        avatar=None,
+    )
+
+    assert shop.real_name is None
+    assert shop.business_license_asset_id is None
 
 
 def _register(

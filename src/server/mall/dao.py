@@ -92,11 +92,11 @@ class ShopDAO(BaseDAO):
         name: str,
         description: str | None,
         avatar: str | None,
-        real_name: str,
-        identity_number: str,
-        business_license_asset_id: str,
-        identity_front_asset_id: str,
-        identity_back_asset_id: str,
+        real_name: str | None = None,
+        identity_number: str | None = None,
+        business_license_asset_id: str | None = None,
+        identity_front_asset_id: str | None = None,
+        identity_back_asset_id: str | None = None,
     ) -> Shop:
         exists = self.db_session.query(Shop).filter(Shop.owner_user_id == owner_user_id).first()
         if exists:
