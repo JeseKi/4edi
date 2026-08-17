@@ -85,7 +85,7 @@ export default function MallLayout() {
           >
             <Link to="/mall" className="flex items-center shrink-0">
               <span className="text-xl font-bold" style={{ color: MALL_PRIMARY }}>
-                优购商城
+                沐泽商城
               </span>
             </Link>
             <div className="flex items-center flex-1 max-w-[480px]">
@@ -144,7 +144,15 @@ export default function MallLayout() {
         </main>
 
         <footer className="text-center text-xs py-6" style={{ color: '#999', background: '#fff' }}>
-          优购商城 · 演示项目 · 货款托管 & 微信支付 · Powered by 4edi
+          沐泽商城 ·{' '}
+          <a
+            href="https://beian.miit.gov.cn/"
+            target="_blank"
+            rel="noopener noreferrer"
+            style={{ color: '#999' }}
+          >
+            浙ICP备2026035190号-1
+          </a>
         </footer>
       </div>
     </ConfigProvider>
