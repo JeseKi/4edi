@@ -18,6 +18,7 @@ import type {
   MallOrderPreview,
   MallOrderStatus,
   MallPage,
+  MallPayment,
   MallPaymentPrepay,
   MallRefund,
   MallRefundType,
@@ -149,9 +150,15 @@ export const getMallOrderTraces = async (orderNo: string): Promise<{ traces: str
 
 export const createMallPayment = async (
   orderNo: string,
-  payType: 'native' | 'jsapi' = 'native',
+  payType: 'native' = 'native',
 ): Promise<MallPaymentPrepay> =>
   (await api.post<MallPaymentPrepay>(`/mall/orders/${orderNo}/payment`, { pay_type: payType })).data
+
+export const getMallPayment = async (orderNo: string): Promise<MallPayment> =>
+  (await api.get<MallPayment>(`/mall/orders/${orderNo}/payment`)).data
+
+export const refreshMallPayment = async (orderNo: string): Promise<MallPayment> =>
+  (await api.post<MallPayment>(`/mall/orders/${orderNo}/payment/refresh`)).data
 
 export const mockPayMallOrder = async (outTradeNo: string): Promise<{ status: string }> =>
   (await api.post<{ status: string }>(`/mall/payments/${outTradeNo}/mock-pay`)).data

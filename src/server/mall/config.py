@@ -1,6 +1,6 @@
 """商城配置模型与共享配置访问器。"""
 
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -39,7 +39,7 @@ class MallConfig(BaseModel):
         title="默认运费",
         description="订单计算运费时的默认运费金额（分）。",
     )
-    payment_mode: str = Field(
+    payment_mode: Literal["mock", "real"] = Field(
         default="mock",
         title="支付通道",
         description="mock 为本地模拟支付；real 为真实微信支付（需配置商户参数）。",
@@ -52,6 +52,26 @@ class MallConfig(BaseModel):
     )
     wechat_pay_private_key_path: str = Field(
         default="", title="商户私钥路径", description="商户 API 证书私钥（apiclient_key.pem）路径。"
+    )
+    wechat_pay_merchant_cert_path: str = Field(
+        default="",
+        title="商户证书路径",
+        description="商户 API 证书（apiclient_cert.pem）路径；为空时使用私钥同目录文件。",
+    )
+    wechat_pay_platform_cert_dir: str = Field(
+        default="",
+        title="微信支付平台证书缓存目录",
+        description="微信支付平台证书缓存目录；为空时使用商户证书同目录的 platform 子目录。",
+    )
+    wechat_pay_public_key_path: str = Field(
+        default="",
+        title="微信支付平台公钥路径",
+        description="微信支付平台公钥 PEM 路径；与平台公钥 ID 必须同时配置。",
+    )
+    wechat_pay_public_key_id: str = Field(
+        default="",
+        title="微信支付平台公钥 ID",
+        description="微信支付平台公钥 ID；与平台公钥路径必须同时配置。",
     )
     wechat_pay_cert_serial_no: str = Field(
         default="", title="商户证书序列号", description="商户 API 证书序列号。"

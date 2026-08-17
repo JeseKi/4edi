@@ -113,7 +113,7 @@ def deliver_phone_verification_code(phone: str, code: str, expires_minutes: int)
     """发送手机验证码；未配置腾讯云短信时在开发/测试环境打印到日志。"""
     if not is_tencent_sms_configured():
         if global_config.app.env not in {"dev", "test"}:
-            raise RuntimeError("短信服务未配置")
+            raise RuntimeError("短信服务未配置，请联系管理员")
         logger.warning("腾讯云短信未配置，验证码将打印到控制台中")
         logger.warning(f"手机号 {phone} 的验证码：{code}")
         return

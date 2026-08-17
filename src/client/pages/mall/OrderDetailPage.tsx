@@ -1,14 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { App, Button, Empty, Input, Modal, Radio, Spin, Steps, Timeline } from 'antd'
+import { App, Button, Empty, Input, Modal, QRCode, Radio, Spin, Steps, Timeline } from 'antd'
 import {
   cancelMallOrder,
   confirmMallOrder,
   createMallPayment,
   createMallRefund,
+  getMallPayment,
   getMallOrder,
   getMallOrderTraces,
   mockPayMallOrder,
+  refreshMallPayment,
 } from '../../lib/mall'
 import { resolveApiErrorMessage } from '../../lib/error'
 import { formatFen, MALL_ORDER_STATUS_LABELS } from '../../lib/mallFormat'
@@ -33,7 +35,12 @@ export default function OrderDetailPage() {
   const [acting, setActing] = useState(false)
   const [payModalOpen, setPayModalOpen] = useState(false)
   const [paying, setPaying] = useState(false)
-  const [payInfo, setPayInfo] = useState<{ out_trade_no: string; code_url: string | null; mode: string } | null>(null)
+  const [payInfo, setPayInfo] = useState<{
+    out_trade_no: string
+    code_url: string | null
+    mode: string
+    expires_at: string
+  } | null>(null)
   const [tracesOpen, setTracesOpen] = useState(false)
   const [traces, setTraces] = useState<string[]>([])
   const [refundModalOpen, setRefundModalOpen] = useState(false)
@@ -89,7 +96,12 @@ export default function OrderDetailPage() {
     setPaying(true)
     try {
       const prepay = await createMallPayment(order.order_no, 'native')
-      setPayInfo({ out_trade_no: prepay.out_trade_no, code_url: prepay.code_url, mode: prepay.mode })
+      setPayInfo({
+        out_trade_no: prepay.out_trade_no,
+        code_url: prepay.code_url,
+        mode: prepay.mode,
+        expires_at: prepay.expires_at,
+      })
       setPayModalOpen(true)
     } catch (err) {
       message.error(resolveApiErrorMessage(err, '发起支付失败'))
@@ -112,6 +124,48 @@ export default function OrderDetailPage() {
       setPaying(false)
     }
   }
+
+  const handleRefreshPayment = async () => {
+    if (!order) return
+    setPaying(true)
+    try {
+      const payment = await refreshMallPayment(order.order_no)
+      if (payment.status === 'success') {
+        message.success('支付成功')
+        setPayModalOpen(false)
+        await load()
+      } else {
+        message.info('暂未查询到支付成功，请稍后重试')
+      }
+    } catch (err) {
+      message.error(resolveApiErrorMessage(err, '支付状态刷新失败'))
+    } finally {
+      setPaying(false)
+    }
+  }
+
+  useEffect(() => {
+    if (!payModalOpen || !order || payInfo?.mode === 'mock') return
+    let cancelled = false
+    const poll = async () => {
+      try {
+        const payment = await getMallPayment(order.order_no)
+        if (!cancelled && payment.status === 'success') {
+          message.success('支付成功')
+          setPayModalOpen(false)
+          await load()
+        }
+      } catch {
+        // 支付弹窗的后台轮询不干扰用户主动操作。
+      }
+    }
+    void poll()
+    const timer = window.setInterval(() => void poll(), 3000)
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [load, message, order, payInfo?.mode, payModalOpen])
 
   const showTraces = async () => {
     if (!order) return
@@ -381,12 +435,17 @@ export default function OrderDetailPage() {
               <div className="text-xs mb-4" style={{ color: '#999' }}>
                 请使用微信扫码完成支付（真实通道）
               </div>
-              <div
-                className="mx-auto mb-4 rounded px-3 py-2 break-all text-xs text-left"
-                style={{ background: '#f5f5f5', color: '#666' }}
-              >
-                {payInfo?.code_url ?? '正在生成支付二维码…'}
+              {payInfo?.code_url ? (
+                <QRCode value={payInfo.code_url} size={200} className="mx-auto mb-4" />
+              ) : (
+                <Spin className="mb-4" />
+              )}
+              <div className="text-xs mb-4" style={{ color: '#999' }}>
+                支付完成后会自动更新；若回调延迟，可手动刷新。
               </div>
+              <Button block loading={paying} onClick={handleRefreshPayment}>
+                已支付，刷新状态
+              </Button>
             </>
           )}
         </div>

@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from datetime import datetime
 
 from .base import PaymentProvider, PrepayResult, QueryResult, RefundResult
 
@@ -24,7 +25,9 @@ class MockPaymentProvider(PaymentProvider):
         description: str,
         pay_type: str,
         notify_url: str,
+        expires_at: datetime,
     ) -> PrepayResult:
+        del amount_fen, description, pay_type, notify_url, expires_at
         return PrepayResult(
             code_url=f"weixin://wxpay/bizpayurl?pr={out_trade_no}",
             prepay_id=f"mock-prepay-{out_trade_no}",
@@ -35,6 +38,9 @@ class MockPaymentProvider(PaymentProvider):
 
     def verify_notification(self, headers: dict, body: bytes) -> dict | None:
         return None
+
+    def close_order(self, *, out_trade_no: str) -> None:
+        del out_trade_no
 
     def create_refund(
         self,

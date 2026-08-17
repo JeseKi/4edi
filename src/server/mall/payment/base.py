@@ -62,6 +62,7 @@ class PaymentProvider(ABC):
         description: str,
         pay_type: str,
         notify_url: str,
+        expires_at: datetime,
     ) -> PrepayResult:
         """发起统一下单，返回支付凭证。"""
 
@@ -72,6 +73,10 @@ class PaymentProvider(ABC):
     @abstractmethod
     def verify_notification(self, headers: dict, body: bytes) -> dict | None:
         """验签并解密支付结果通知；无效通知返回 None。"""
+
+    @abstractmethod
+    def close_order(self, *, out_trade_no: str) -> None:
+        """关闭未支付交易；实现应保证重复调用安全。"""
 
     @abstractmethod
     def create_refund(
@@ -93,3 +98,8 @@ class PaymentProvider(ABC):
             "ok": configured,
             "message": "provider is not configured" if not configured else "ok",
         }
+
+    def configuration_error(self) -> str | None:
+        if self.is_configured():
+            return None
+        return "支付通道配置不完整"

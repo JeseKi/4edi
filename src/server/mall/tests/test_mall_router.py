@@ -714,6 +714,60 @@ def test_payment_is_idempotent(test_client, test_db_session, init_test_database)
     _check(test_db_session)
 
 
+def test_payment_reuses_active_trade_and_supports_refresh(
+    test_client, init_test_database
+):
+    seller_headers = _login(
+        test_client, username=_register(test_client, username="seller10", email="seller10@test.com")
+    )
+    buyer_headers = _login(
+        test_client, username=_register(test_client, username="buyer10", email="buyer10@test.com")
+    )
+    admin_headers = _login_admin(test_client)
+    _, _, sku_id = _seed_shop_and_goods(
+        test_client, seller_headers=seller_headers, admin_headers=admin_headers
+    )
+    address = test_client.post(
+        "/api/mall/addresses",
+        json={
+            "receiver": "支付复用用户",
+            "phone": "13800138005",
+            "province": "广东省",
+            "city": "深圳市",
+            "district": "南山区",
+            "detail": "科技园 6 号",
+        },
+        headers=buyer_headers,
+    ).json()
+    order = test_client.post(
+        "/api/mall/orders",
+        json={"address_id": address["id"], "items": [{"sku_id": sku_id, "quantity": 1}]},
+        headers=buyer_headers,
+    ).json()
+
+    first = test_client.post(
+        f"/api/mall/orders/{order['order_no']}/payment",
+        json={"pay_type": "native"},
+        headers=buyer_headers,
+    )
+    second = test_client.post(
+        f"/api/mall/orders/{order['order_no']}/payment",
+        json={"pay_type": "native"},
+        headers=buyer_headers,
+    )
+    assert first.status_code == 200, first.text
+    assert second.status_code == 200, second.text
+    assert first.json()["out_trade_no"] == second.json()["out_trade_no"]
+    assert first.json()["expires_at"]
+
+    refreshed = test_client.post(
+        f"/api/mall/orders/{order['order_no']}/payment/refresh",
+        headers=buyer_headers,
+    )
+    assert refreshed.status_code == 200, refreshed.text
+    assert refreshed.json()["status"] == "unpaid"
+
+
 def test_unauthenticated_requests_rejected(test_client):
     resp = test_client.get("/api/mall/cart")
     assert resp.status_code == 401

@@ -514,7 +514,7 @@ class UserCouponOut(BaseModel):
 
 
 class PaymentPrepayIn(BaseModel):
-    pay_type: Literal["native", "jsapi"] = "native"
+    pay_type: Literal["native"] = "native"
 
 
 class PaymentPrepayOut(BaseModel):
@@ -527,6 +527,7 @@ class PaymentPrepayOut(BaseModel):
     code_url: str | None
     prepay_id: str | None
     mode: str
+    expires_at: datetime
 
 
 class PaymentOut(BaseModel):

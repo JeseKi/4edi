@@ -175,10 +175,15 @@ async def send_phone_password_reset_code(
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail=str(exc)
         )
-    except RuntimeError:
+    except RuntimeError as exc:
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="验证码发送失败"
-        )
+            status_code=(
+                status.HTTP_503_SERVICE_UNAVAILABLE
+                if "未配置" in str(exc)
+                else status.HTTP_500_INTERNAL_SERVER_ERROR
+            ),
+            detail="短信服务未配置，请稍后再试" if "未配置" in str(exc) else "验证码发送失败",
+        ) from exc
     return {"message": "验证码已发送"}
 
 

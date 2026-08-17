@@ -615,6 +615,9 @@ class Payment(Base):
     status: Mapped[PaymentStatus] = mapped_column(
         SQLEnum(PaymentStatus), nullable=False, default=PaymentStatus.UNPAID
     )
+    is_active: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True, server_default="1"
+    )
     prepay_id: Mapped[Optional[str]] = mapped_column(String(128), default=None)
     code_url: Mapped[Optional[str]] = mapped_column(String(512), default=None)
     transaction_id: Mapped[Optional[str]] = mapped_column(String(64), default=None)

@@ -201,25 +201,34 @@ default_deposit_fen = 1000
 freight_fen = 0
 # 支付通道；mock 为本地模拟支付，real 为真实微信支付。
 payment_mode = "mock"
-# 以下为真实微信支付（payment_mode = "real"）时所需的商户参数。
+# 以下为真实微信支付（payment_mode = "real"）时所需的非敏感商户参数。
 wechat_pay_app_id = ""
 wechat_pay_merchant_id = ""
+# 容器内商户私钥路径；请以只读挂载提供 apiclient_key.pem，且仅允许应用用户读取。
 wechat_pay_private_key_path = ""
-wechat_pay_cert_serial_no = ""
-wechat_pay_apiv3_key = ""
-# 微信支付回调公网基础地址；为空时使用 app.domain。
+# 商户证书路径；为空时自动读取私钥同目录的 apiclient_cert.pem，并提取序列号。
+wechat_pay_merchant_cert_path = ""
+# 微信支付平台证书缓存目录；为空时使用商户证书同目录的 platform 子目录。
+# 应用需对此目录有写入权限，以便 SDK 自动更新平台证书。
+wechat_pay_platform_cert_dir = ""
+# 可选：使用微信支付平台公钥模式时，以下两项必须同时配置；配置后无需预置平台证书。
+# wechat_pay_public_key_path = "data/wxp_cert/pub_key.pem"
+# wechat_pay_public_key_id = "PUB_KEY_ID_..."
+# 仅当无法提供商户证书文件时，才手动填写证书序列号（可省略）。
+# wechat_pay_cert_serial_no = ""
+# APIv3 密钥仅在 .env（WECHAT_PAY_APIV3_KEY）或密钥管理服务中提供。
+# 微信支付回调公网基础地址；最终通知地址固定为
+# <base>/api/mall/payments/wechat/notify。必须是微信可访问的 HTTPS 地址；为空时使用 app.domain。
 wechat_pay_notify_base_url = ""
 
 [sms]
-# 腾讯云短信 SecretId（也可用 TENCENTCLOUD_SECRET_ID 环境变量）。
-secret_id = ""
-# 腾讯云短信 SecretKey（也可用 TENCENTCLOUD_SECRET_KEY 环境变量）。
-secret_key = ""
+# 腾讯云短信 SecretId / SecretKey 仅在 .env（TENCENTCLOUD_SECRET_ID /
+# TENCENTCLOUD_SECRET_KEY）或密钥管理服务中提供。
 # 腾讯云短信应用 SDKAppID。
 sdk_app_id = ""
 # 腾讯云短信签名名称。
 sign_name = ""
-# 腾讯云短信验证码模板 ID。
+# 腾讯云短信验证码模板 ID；模板参数顺序必须是：验证码、有效分钟数。
 template_id = ""
 # 腾讯云短信服务地域。
 region = "ap-guangzhou"

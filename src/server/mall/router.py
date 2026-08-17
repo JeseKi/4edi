@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from typing import Annotated, Literal
 
 from fastapi import (
@@ -530,26 +531,60 @@ async def create_payment(
     current_user: AuthenticatedPrincipal = Depends(_require_login),
     database_executor: DatabaseExecutor = Depends(get_database_executor),
 ):
-    def _create(db):
-        payment = service.create_payment(
-            db, current_user.user_id, order_no, pay_type=payload.pay_type
+    del payload
+    from .payment import get_payment_provider
+    from .payment.service import _resolve_notify_url
+
+    provider = get_payment_provider()
+    if configuration_error := provider.configuration_error():
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=configuration_error)
+
+    prepared = await database_executor.run(
+        lambda db: service.prepare_payment(db, current_user.user_id, order_no)
+    )
+    if not prepared["code_url"]:
+        try:
+            prepay = await asyncio.to_thread(
+                provider.create_prepay,
+                out_trade_no=prepared["out_trade_no"],
+                amount_fen=prepared["amount_fen"],
+                description=prepared["description"],
+                pay_type="native",
+                notify_url=_resolve_notify_url(),
+                expires_at=prepared["expires_at"],
+            )
+        except Exception as exc:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY, detail=f"支付下单失败：{exc}"
+            ) from exc
+        saved = await database_executor.run(
+            lambda db: {
+                "code_url": (payment := service.save_payment_prepay(
+                    db,
+                    current_user.user_id,
+                    order_no,
+                    payment_id=prepared["payment_id"],
+                    code_url=prepay.code_url,
+                    prepay_id=prepay.prepay_id,
+                )).code_url,
+                "prepay_id": payment.prepay_id,
+            }
         )
-        from .payment import get_payment_provider
+        prepared["code_url"] = saved["code_url"]
+        prepared["prepay_id"] = saved["prepay_id"]
 
-        provider = get_payment_provider()
-        return {
-            "id": payment.id,
-            "out_trade_no": payment.out_trade_no,
-            "order_no": payment.order_no,
-            "amount_fen": payment.amount_fen,
-            "channel": payment.channel,
-            "pay_type": payment.pay_type,
-            "code_url": payment.code_url,
-            "prepay_id": payment.prepay_id,
-            "mode": provider.implementation,
-        }
-
-    return await database_executor.run(_create)
+    return {
+        "id": prepared["payment_id"],
+        "out_trade_no": prepared["out_trade_no"],
+        "order_no": prepared["order_no"],
+        "amount_fen": prepared["amount_fen"],
+        "channel": provider.key,
+        "pay_type": "native",
+        "code_url": prepared["code_url"],
+        "prepay_id": prepared["prepay_id"],
+        "mode": provider.implementation,
+        "expires_at": prepared["expires_at"],
+    }
 
 
 @router.get("/orders/{order_no}/payment", summary="查询支付状态", response_model=PaymentOut)
@@ -563,6 +598,58 @@ async def get_payment_status(
         return PaymentOut.model_validate(payment)
 
     return await database_executor.run(_get)
+
+
+@router.post(
+    "/orders/{order_no}/payment/refresh",
+    summary="主动刷新微信支付状态",
+    response_model=PaymentOut,
+)
+async def refresh_payment_status(
+    order_no: str,
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    from .payment import get_payment_provider
+
+    payment = await database_executor.run(
+        lambda db: {
+            "out_trade_no": (item := service.get_payment_for_buyer(
+                db, current_user.user_id, order_no
+            )).out_trade_no,
+            "status": item.status.value,
+            "id": item.id,
+        }
+    )
+    provider = get_payment_provider()
+    if provider.is_mock:
+        return await database_executor.run(
+            lambda db: PaymentOut.model_validate(
+                service.get_payment_for_buyer(db, current_user.user_id, order_no)
+            )
+        )
+    result = await asyncio.to_thread(
+        provider.query_order, out_trade_no=str(payment["out_trade_no"])
+    )
+    raw = result.raw or {}
+    amount = raw.get("amount") if isinstance(raw, dict) else None
+    amount_fen = amount.get("total") if isinstance(amount, dict) else None
+    currency = amount.get("currency") if isinstance(amount, dict) else None
+
+    def _apply(db):
+        updated = service.apply_payment_query_result(
+            db,
+            current_user.user_id,
+            order_no,
+            paid=result.paid,
+            transaction_id=result.transaction_id,
+            paid_at=result.paid_at,
+            amount_fen=amount_fen if isinstance(amount_fen, int) else None,
+            currency=currency if isinstance(currency, str) else None,
+        )
+        return PaymentOut.model_validate(updated)
+
+    return await database_executor.run(_apply)
 
 
 @router.post("/payments/{out_trade_no}/mock-pay", summary="模拟支付（仅 mock 通道）")
@@ -614,11 +701,23 @@ async def wechat_pay_notify(
     resource = data.get("resource") or {}
     out_trade_no = resource.get("out_trade_no")
     transaction_id = resource.get("transaction_id")
+    if resource.get("trade_state") != "SUCCESS":
+        return JSONResponse({"code": "SUCCESS", "message": "忽略非成功支付通知"})
+    amount = resource.get("amount") or {}
+    amount_fen = amount.get("total") if isinstance(amount, dict) else None
+    currency = amount.get("currency") if isinstance(amount, dict) else None
     if not out_trade_no:
         return JSONResponse({"code": "FAIL", "message": "缺少商户订单号"})
+    if not isinstance(amount_fen, int) or not isinstance(currency, str):
+        return JSONResponse({"code": "FAIL", "message": "缺少支付金额信息"})
     await database_executor.run(
         lambda db: service.handle_payment_notification(
-            db, out_trade_no=out_trade_no, transaction_id=transaction_id
+            db,
+            out_trade_no=out_trade_no,
+            transaction_id=transaction_id,
+            amount_fen=amount_fen,
+            currency=currency,
+            require_amount=True,
         )
     )
     return JSONResponse({"code": "SUCCESS", "message": "成功"})

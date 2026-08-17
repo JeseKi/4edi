@@ -7,6 +7,7 @@ import json
 from datetime import datetime
 from pathlib import Path
 
+from cryptography import x509
 from loguru import logger
 
 from .base import PaymentProvider, PrepayResult, QueryResult, RefundResult
@@ -48,13 +49,21 @@ class WeChatPayV3Provider(PaymentProvider):
         app_id: str,
         merchant_id: str,
         private_key_path: str,
+        merchant_cert_path: str,
+        platform_cert_dir: str,
         cert_serial_no: str,
         apiv3_key: str,
+        public_key_path: str = "",
+        public_key_id: str = "",
         notify_url: str = "",
     ) -> None:
         self._app_id = app_id
         self._merchant_id = merchant_id
         self._private_key_path = private_key_path
+        self._merchant_cert_path = merchant_cert_path
+        self._platform_cert_dir = platform_cert_dir
+        self._public_key_path = public_key_path
+        self._public_key_id = public_key_id
         self._cert_serial_no = cert_serial_no
         self._apiv3_key = apiv3_key
         self._notify_url = notify_url
@@ -65,17 +74,47 @@ class WeChatPayV3Provider(PaymentProvider):
             return self._client
         from wechatpayv3 import WeChatPay, WeChatPayType  # type: ignore[import-untyped]
 
-        private_key = Path(self._private_key_path).read_text(encoding="utf-8")
+        private_key_path = Path(self._private_key_path)
+        private_key = private_key_path.read_text(encoding="utf-8")
+        public_key = None
+        if self._public_key_path:
+            public_key = Path(self._public_key_path).read_text(encoding="utf-8")
+        platform_cert_dir = (
+            Path(self._platform_cert_dir)
+            if self._platform_cert_dir
+            else self._merchant_cert_path_for_serial().parent / "platform"
+        )
+        platform_cert_dir.mkdir(parents=True, exist_ok=True)
         self._client = WeChatPay(
             wechatpay_type=WeChatPayType.NATIVE,
             mchid=self._merchant_id,
             private_key=private_key,
-            cert_serial_no=self._cert_serial_no,
+            cert_serial_no=self._resolved_cert_serial_no(),
             appid=self._app_id,
             apiv3_key=self._apiv3_key,
             notify_url=self._notify_url,
+            cert_dir=str(platform_cert_dir),
+            public_key=public_key,
+            public_key_id=self._public_key_id or None,
         )
         return self._client
+
+    def _merchant_cert_path_for_serial(self) -> Path:
+        if self._merchant_cert_path:
+            return Path(self._merchant_cert_path)
+        return Path(self._private_key_path).with_name("apiclient_cert.pem")
+
+    def _resolved_cert_serial_no(self) -> str:
+        if self._cert_serial_no:
+            return self._cert_serial_no
+        cert_path = self._merchant_cert_path_for_serial()
+        if not cert_path.is_file():
+            return ""
+        try:
+            certificate = x509.load_pem_x509_certificate(cert_path.read_bytes())
+        except (OSError, ValueError):
+            return ""
+        return format(certificate.serial_number, "X")
 
     def is_configured(self) -> bool:
         return bool(
@@ -83,7 +122,7 @@ class WeChatPayV3Provider(PaymentProvider):
             and self._merchant_id
             and self._private_key_path
             and Path(self._private_key_path).is_file()
-            and self._cert_serial_no
+            and self._resolved_cert_serial_no()
             and self._apiv3_key
         )
 
@@ -95,25 +134,29 @@ class WeChatPayV3Provider(PaymentProvider):
         description: str,
         pay_type: str,
         notify_url: str,
+        expires_at: datetime,
     ) -> PrepayResult:
         from wechatpayv3 import WeChatPayType
 
+        if pay_type != "native":
+            raise RuntimeError("当前仅支持微信 Native 扫码支付")
         client = self._get_client()
         code, message = client.pay(
             description=description,
             out_trade_no=out_trade_no,
             amount={"total": amount_fen, "currency": "CNY"},
             notify_url=notify_url,
-            pay_type=WeChatPayType.NATIVE if pay_type == "native" else WeChatPayType.JSAPI,
+            time_expire=expires_at.isoformat(timespec="seconds"),
+            pay_type=WeChatPayType.NATIVE,
         )
         if code != 200:
             logger.error("微信支付统一下单失败：{} {}", code, message)
             raise RuntimeError(f"微信支付统一下单失败：{code}")
         result = _parse_body(message)
         code_url = result.get("code_url")
-        if code_url:
-            return PrepayResult(code_url=code_url)
-        return PrepayResult(prepay_id=result.get("prepay_id"))
+        if not code_url:
+            raise RuntimeError("微信支付未返回二维码地址")
+        return PrepayResult(code_url=code_url)
 
     def query_order(self, *, out_trade_no: str) -> QueryResult:
         client = self._get_client()
@@ -137,6 +180,12 @@ class WeChatPayV3Provider(PaymentProvider):
         except Exception as exc:
             logger.warning("微信支付通知验签失败：{}", exc)
             return None
+
+    def close_order(self, *, out_trade_no: str) -> None:
+        client = self._get_client()
+        code, message = client.close(out_trade_no=out_trade_no)
+        if code not in {200, 204}:
+            logger.warning("微信支付关闭订单失败：{} {}", code, message)
 
     def create_refund(
         self,
@@ -163,3 +212,25 @@ class WeChatPayV3Provider(PaymentProvider):
             refund_id=result.get("refund_id"),
             message=str(message),
         )
+
+    def configuration_error(self) -> str | None:
+        missing = []
+        if not self._app_id:
+            missing.append("WECHAT_PAY_APP_ID")
+        if not self._merchant_id:
+            missing.append("WECHAT_PAY_MERCHANT_ID")
+        if not self._private_key_path or not Path(self._private_key_path).is_file():
+            missing.append("WECHAT_PAY_PRIVATE_KEY_PATH")
+        if not self._resolved_cert_serial_no():
+            missing.append("商户证书序列号（WECHAT_PAY_CERT_SERIAL_NO 或 apiclient_cert.pem）")
+        if not self._apiv3_key:
+            missing.append("WECHAT_PAY_APIV3_KEY")
+        if bool(self._public_key_path) != bool(self._public_key_id):
+            missing.append("WECHAT_PAY_PUBLIC_KEY_PATH 与 WECHAT_PAY_PUBLIC_KEY_ID")
+        elif self._public_key_path and not Path(self._public_key_path).is_file():
+            missing.append("WECHAT_PAY_PUBLIC_KEY_PATH")
+        if not self._notify_url:
+            missing.append("WECHAT_PAY_NOTIFY_BASE_URL 或 APP_DOMAIN")
+        if not missing:
+            return None
+        return f"微信支付配置不完整：{', '.join(missing)}"

@@ -699,6 +699,16 @@ def _do_cancel(db: Session, order: Order, reason: str) -> None:
     order.status = OrderStatus.CANCELLED
     order.cancelled_at = _utcnow()
     order.cancel_reason = reason
+    payment = PaymentDAO(db).get_active_by_order_no(order.order_no, lock=True)
+    if payment is not None and payment.status == PaymentStatus.UNPAID:
+        payment.is_active = False
+        payment.status = PaymentStatus.FAILED
+        try:
+            from ..payment import get_payment_provider
+
+            get_payment_provider().close_order(out_trade_no=payment.out_trade_no)
+        except Exception as exc:
+            logger.warning("关闭微信支付单失败 {}: {}", payment.out_trade_no, exc)
     _restore_stock(db, item_snapshots)
     OrderLogDAO(db).append(order.id, f"订单已取消：{reason}")
 
@@ -830,37 +840,57 @@ def order_list_payloads(db: Session, orders: list[Order]) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
-def create_payment(
-    db: Session, user_id: int, order_no: str, *, pay_type: str
-) -> Payment:
-    order = _get_order_for_buyer(db, user_id, order_no)
+def prepare_payment(db: Session, user_id: int, order_no: str) -> dict:
+    """在短事务中创建或复用当前支付单，外部微信调用由路由在事务外完成。"""
+    order = OrderDAO(db).lock_by_no(order_no)
+    if order is None or order.buyer_id != user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="订单不存在")
     if order.status != OrderStatus.PENDING_PAYMENT:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前订单不可支付")
-    from ..payment import get_payment_provider
+    payment = PaymentDAO(db).get_active_by_order_no(order.order_no, lock=True)
+    if payment is None:
+        payment = PaymentDAO(db).create(
+            out_trade_no=_gen_business_no("P"),
+            order_no=order.order_no,
+            amount_fen=order.pay_amount_fen,
+            channel="wechat",
+            pay_type="native",
+        )
+    return {
+        "payment_id": payment.id,
+        "out_trade_no": payment.out_trade_no,
+        "order_no": order.order_no,
+        "amount_fen": payment.amount_fen,
+        "description": order.receiver_name,
+        "code_url": payment.code_url,
+        "prepay_id": payment.prepay_id,
+        "expires_at": _as_utc(order.created_at)
+        + timedelta(minutes=mall_config.order_pay_timeout_minutes),
+    }
 
-    provider = get_payment_provider()
-    payment = PaymentDAO(db).create(
-        out_trade_no=_gen_business_no("P"),
-        order_no=order.order_no,
-        amount_fen=order.pay_amount_fen,
-        channel=provider.key,
-        pay_type=pay_type,
-    )
-    notify_url = _resolve_notify_url()
-    try:
-        prepay = provider.create_prepay(
-            out_trade_no=payment.out_trade_no,
-            amount_fen=payment.amount_fen,
-            description=order.receiver_name,
-            pay_type=pay_type,
-            notify_url=notify_url,
-        )
-    except Exception as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"支付下单失败：{exc}"
-        )
-    payment.prepay_id = prepay.prepay_id
-    payment.code_url = prepay.code_url
+
+def save_payment_prepay(
+    db: Session,
+    user_id: int,
+    order_no: str,
+    *,
+    payment_id: int,
+    code_url: str | None,
+    prepay_id: str | None,
+) -> Payment:
+    order = OrderDAO(db).lock_by_no(order_no)
+    if order is None or order.buyer_id != user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="订单不存在")
+    payment = PaymentDAO(db).lock(payment_id)
+    if (
+        payment is None
+        or payment.order_no != order.order_no
+        or not payment.is_active
+        or order.status != OrderStatus.PENDING_PAYMENT
+    ):
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail="支付单已失效")
+    payment.code_url = code_url
+    payment.prepay_id = prepay_id
     return payment
 
 
@@ -872,7 +902,7 @@ def _resolve_notify_url() -> str:
 
 def get_payment_for_buyer(db: Session, user_id: int, order_no: str) -> Payment:
     order = _get_order_for_buyer(db, user_id, order_no)
-    payment = PaymentDAO(db).get_by_order_no(order.order_no)
+    payment = PaymentDAO(db).get_active_by_order_no(order.order_no)
     if payment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="支付记录不存在")
     return payment
@@ -890,6 +920,9 @@ def mark_paid(
     if payment is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="支付记录不存在")
     if payment.status == PaymentStatus.SUCCESS:
+        return payment
+    if not payment.is_active:
+        logger.warning("忽略已关闭支付单的支付结果：{}", out_trade_no)
         return payment
     order = OrderDAO(db).lock_by_no(payment.order_no)
     if order is None:
@@ -925,10 +958,56 @@ def mark_paid(
 
 
 def handle_payment_notification(
-    db: Session, *, out_trade_no: str, transaction_id: str | None
+    db: Session,
+    *,
+    out_trade_no: str,
+    transaction_id: str | None,
+    amount_fen: int | None = None,
+    currency: str | None = None,
+    paid_at: datetime | None = None,
+    require_amount: bool = False,
 ) -> Payment:
     """支付回调入口（微信通知 / mock 支付共用），同一短事务内完成入账。"""
-    return mark_paid(db, out_trade_no=out_trade_no, transaction_id=transaction_id)
+    payment = PaymentDAO(db).get_by_out_trade_no(out_trade_no)
+    if payment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="支付记录不存在")
+    if require_amount and (amount_fen is None or currency is None):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="支付金额信息缺失")
+    if amount_fen is not None and amount_fen != payment.amount_fen:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="支付金额不匹配")
+    if currency is not None and currency != "CNY":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="支付币种不匹配")
+    return mark_paid(
+        db,
+        out_trade_no=out_trade_no,
+        transaction_id=transaction_id,
+        paid_at=paid_at,
+    )
+
+
+def apply_payment_query_result(
+    db: Session,
+    user_id: int,
+    order_no: str,
+    *,
+    paid: bool,
+    transaction_id: str | None,
+    paid_at: datetime | None,
+    amount_fen: int | None,
+    currency: str | None,
+) -> Payment:
+    payment = get_payment_for_buyer(db, user_id, order_no)
+    if not paid or payment.status == PaymentStatus.SUCCESS:
+        return payment
+    return handle_payment_notification(
+        db,
+        out_trade_no=payment.out_trade_no,
+        transaction_id=transaction_id,
+        paid_at=paid_at,
+        amount_fen=amount_fen,
+        currency=currency,
+        require_amount=True,
+    )
 
 
 def query_payment_status(db: Session, user_id: int, order_no: str) -> dict:

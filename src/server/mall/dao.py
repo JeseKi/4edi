@@ -827,6 +827,14 @@ class PaymentDAO(BaseDAO):
             .first()
         )
 
+    def get_active_by_order_no(self, order_no: str, *, lock: bool = False) -> Payment | None:
+        query = self.db_session.query(Payment).filter(
+            Payment.order_no == order_no, Payment.is_active.is_(True)
+        )
+        if lock:
+            query = query.with_for_update()
+        return query.first()
+
 
 class ChatMessageDAO(BaseDAO):
     def create(

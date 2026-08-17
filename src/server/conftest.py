@@ -166,7 +166,9 @@ def test_db_session(test_db_engine: Engine) -> Iterator[Session]:
 
 
 @pytest.fixture(scope="function")
-def test_client(test_db_session: Session) -> Iterator[SyncASGITestClient]:
+def test_client(
+    test_db_session: Session, monkeypatch: pytest.MonkeyPatch
+) -> Iterator[SyncASGITestClient]:
     """提供一个配置了测试数据库的 FastAPI TestClient。"""
     from src.server.main import app
     from src.server.database_executor import DatabaseExecutor
@@ -181,8 +183,13 @@ def test_client(test_db_session: Session) -> Iterator[SyncASGITestClient]:
     )
     from src.server.platform.runtime import ApplicationRuntime
     from src.server.config import global_config
+    from src.server.auth.service import sms
     from src.server.task_runtime import TaskRuntime
 
+    # 测试不应因开发机遗留的真实商户凭据而调用微信支付网络接口。
+    monkeypatch.setattr(global_config.mall, "payment_mode", "mock")
+    # 同理，手机号流程测试只验证本地验证码逻辑，不发送真实短信。
+    monkeypatch.setattr(sms, "is_tencent_sms_configured", lambda: False)
     client = SyncASGITestClient(app)
     TestTaskSession = sessionmaker(bind=test_db_session.get_bind(), autocommit=False, autoflush=False)
 

@@ -788,6 +788,20 @@ export interface MallPaymentPrepay {
   code_url: string | null
   prepay_id: string | null
   mode: string
+  expires_at: string
+}
+
+export interface MallPayment {
+  id: number
+  out_trade_no: string
+  order_no: string
+  amount_fen: number
+  channel: string
+  pay_type: string | null
+  status: string
+  transaction_id: string | null
+  paid_at: string | null
+  created_at: string
 }
 
 export interface MallWallet {
