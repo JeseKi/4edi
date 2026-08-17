@@ -11,7 +11,7 @@ from .wechat_v3 import WeChatPayV3Provider
 
 
 def get_payment_provider() -> PaymentProvider:
-    """按配置返回真实微信支付或本地模拟实现。"""
+    """按配置返回微信支付或本地开发测试实现。"""
     if mall_config.payment_mode == "real":
         return WeChatPayV3Provider(
             app_id=mall_config.wechat_pay_app_id,

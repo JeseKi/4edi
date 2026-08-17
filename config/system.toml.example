@@ -199,9 +199,9 @@ auto_confirm_receipt_days = 7
 default_deposit_fen = 1000
 # 订单默认运费（分）。
 freight_fen = 0
-# 支付通道；mock 为本地模拟支付，real 为真实微信支付。
+# 支付服务；real 使用微信支付，mock 仅用于本地开发与自动化测试。
 payment_mode = "mock"
-# 以下为真实微信支付（payment_mode = "real"）时所需的非敏感商户参数。
+# 以下为微信支付（payment_mode = "real"）时所需的非敏感商户参数。
 wechat_pay_app_id = ""
 wechat_pay_merchant_id = ""
 # 容器内商户私钥路径；请以只读挂载提供 apiclient_key.pem，且仅允许应用用户读取。

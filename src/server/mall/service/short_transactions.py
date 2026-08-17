@@ -1305,7 +1305,7 @@ def submit_return_tracking(
 
 
 def _initiate_refund(db: Session, refund: Refund, handler_user_id: int | None) -> None:
-    """发起通道退款：mock 通道同步成功；真实通道进入退款中等待回调。"""
+    """发起退款：本地开发测试实现同步成功；微信支付等待退款结果通知。"""
     order = OrderDAO(db).lock_by_no(refund.order_no)
     if order is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="订单不存在")

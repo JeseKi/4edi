@@ -40,7 +40,7 @@ class RefundResult:
 
 
 class PaymentProvider(ABC):
-    """可替换的支付通道实现；mock 与真实微信支付共用该契约。"""
+    """支付服务契约；微信支付与本地开发测试实现共用该边界。"""
 
     key: str
     implementation: PaymentMode
@@ -51,7 +51,7 @@ class PaymentProvider(ABC):
 
     @abstractmethod
     def is_configured(self) -> bool:
-        """是否具备发起真实支付所需配置。"""
+        """是否具备发起微信支付所需配置。"""
 
     @abstractmethod
     def create_prepay(

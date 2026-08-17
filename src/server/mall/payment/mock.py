@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""本地模拟支付通道，用于开发与测试。"""
+"""本地支付演示实现，用于开发与测试。"""
 
 from __future__ import annotations
 

@@ -186,7 +186,7 @@ def test_client(
     from src.server.auth.service import sms
     from src.server.task_runtime import TaskRuntime
 
-    # 测试不应因开发机遗留的真实商户凭据而调用微信支付网络接口。
+    # 测试不应因开发机遗留的商户凭据而调用微信支付网络接口。
     monkeypatch.setattr(global_config.mall, "payment_mode", "mock")
     # 同理，手机号流程测试只验证本地验证码逻辑，不发送真实短信。
     monkeypatch.setattr(sms, "is_tencent_sms_configured", lambda: False)

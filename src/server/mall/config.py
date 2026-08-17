@@ -41,8 +41,8 @@ class MallConfig(BaseModel):
     )
     payment_mode: Literal["mock", "real"] = Field(
         default="mock",
-        title="支付通道",
-        description="mock 为本地模拟支付；real 为真实微信支付（需配置商户参数）。",
+        title="支付服务",
+        description="real 使用微信支付；mock 仅用于本地开发与自动化测试。",
     )
     wechat_pay_app_id: str = Field(
         default="", title="微信支付 AppID", description="微信支付商户号绑定的应用 AppID。"

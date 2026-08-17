@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""支付 Provider 边界：真实微信支付与本地模拟实现。"""
+"""支付 Provider 边界：微信支付与本地开发测试实现。"""
 
 from __future__ import annotations
 

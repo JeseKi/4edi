@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import { App, Button, Empty, Input, Modal, QRCode, Radio, Spin, Steps, Timeline } from 'antd'
+import { WechatFilled } from '@ant-design/icons'
 import {
   cancelMallOrder,
   confirmMallOrder,
@@ -420,23 +421,29 @@ export default function OrderDetailPage() {
               >
                 <div className="text-center">
                   <div className="text-lg mb-1">微信</div>
-                  <div className="text-xs opacity-80">模拟支付码</div>
+                  <div className="text-xs opacity-80">本地开发演示</div>
                 </div>
               </div>
               <div className="text-xs mb-4" style={{ color: '#999' }}>
-                当前为模拟支付通道，点击下方按钮完成支付
+                当前为本地开发模式，点击下方按钮完成支付演示
               </div>
               <Button type="primary" block loading={paying} onClick={handleMockPay} style={{ background: '#F31947' }}>
-                模拟支付成功
+                完成支付演示
               </Button>
             </>
           ) : (
             <>
+              <div className="mb-4 flex items-center justify-center gap-2 text-sm" style={{ color: '#07C160' }}>
+                <WechatFilled style={{ fontSize: 20 }} />
+                <span>微信支付</span>
+              </div>
               <div className="text-xs mb-4" style={{ color: '#999' }}>
-                请使用微信扫码完成支付（真实通道）
+                请使用微信扫描二维码完成支付
               </div>
               {payInfo?.code_url ? (
-                <QRCode value={payInfo.code_url} size={200} className="mx-auto mb-4" />
+                <div className="mb-4 flex w-full justify-center">
+                  <QRCode value={payInfo.code_url} size={200} />
+                </div>
               ) : (
                 <Spin className="mb-4" />
               )}

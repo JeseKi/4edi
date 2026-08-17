@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""真实微信支付（APIv3）实现。"""
+"""微信支付（APIv3）实现。"""
 
 from __future__ import annotations
 
@@ -38,7 +38,7 @@ def _parse_body(message: str | bytes | dict) -> dict:
 
 
 class WeChatPayV3Provider(PaymentProvider):
-    """基于 wechatpayv3 库的真实微信支付直连商户实现。"""
+    """基于 wechatpayv3 库的微信支付直连商户实现。"""
 
     key = "wechat"
     implementation = "real"

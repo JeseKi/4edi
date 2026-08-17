@@ -662,7 +662,7 @@ async def mock_pay(
 
     if not get_payment_provider().is_mock:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="仅 mock 支付通道支持模拟支付"
+            status_code=status.HTTP_403_FORBIDDEN, detail="模拟支付仅用于本地开发与测试"
         )
 
     def _pay(db):
