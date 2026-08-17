@@ -36,6 +36,7 @@ export default function MallHomePage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const keyword = searchParams.get('keyword') ?? ''
   const categoryId = searchParams.get('category_id') ? Number(searchParams.get('category_id')) : undefined
+  const shopId = searchParams.get('shop_id') ? Number(searchParams.get('shop_id')) : undefined
   const [sort, setSort] = useState<SortKey>('default')
   const [page, setPage] = useState(1)
   const [goods, setGoods] = useState<MallGoods[]>([])
@@ -53,7 +54,7 @@ export default function MallHomePage() {
 
   useEffect(() => {
     setPage(1)
-  }, [keyword, categoryId, sort])
+  }, [keyword, categoryId, shopId, sort])
 
   const load = useCallback(async () => {
     setLoading(true)
@@ -61,6 +62,7 @@ export default function MallHomePage() {
       const result = await searchMallGoods({
         keyword: keyword || undefined,
         category_id: categoryId,
+        shop_id: shopId,
         sort,
         page,
         page_size: 20,
@@ -70,7 +72,7 @@ export default function MallHomePage() {
     } finally {
       setLoading(false)
     }
-  }, [keyword, categoryId, sort, page])
+  }, [keyword, categoryId, shopId, sort, page])
 
   useEffect(() => {
     load()

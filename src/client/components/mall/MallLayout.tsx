@@ -55,6 +55,11 @@ export default function MallLayout() {
   const userMenu = {
     items: [
       { key: 'orders', label: <Link to="/mall/orders">我的订单</Link> },
+      { key: 'refunds', label: <Link to="/mall/refunds">退款 / 售后</Link> },
+      { key: 'evaluations', label: <Link to="/mall/evaluations">评价中心</Link> },
+      { key: 'coupons', label: <Link to="/mall/coupons">领券中心</Link> },
+      { key: 'favorites', label: <Link to="/mall/favorites">我的收藏</Link> },
+      { key: 'footprints', label: <Link to="/mall/footprints">浏览足迹</Link> },
       { key: 'chat', label: <Link to="/mall/chat">在线客服</Link> },
       { key: 'logout', label: '退出登录', danger: true },
     ],

@@ -27,7 +27,17 @@ from src.server.database_executor import DatabaseExecutor, get_database_executor
 from src.server.task_runtime import TaskRuntime, get_task_runtime
 
 from . import service
-from .models import GoodsStatus, OrderStatus, ShopStatus, WithdrawStatus
+from .models import (
+    CouponScope,
+    CouponStatus,
+    FavoriteTargetType,
+    GoodsStatus,
+    OrderStatus,
+    RefundStatus,
+    ShopStatus,
+    UserCouponStatus,
+    WithdrawStatus,
+)
 from .schemas import (
     AddressIn,
     AddressOut,
@@ -39,24 +49,44 @@ from .schemas import (
     ChatConversationOut,
     ChatMessageCreateIn,
     ChatMessageOut,
+    CouponTemplateCreateIn,
+    CouponTemplateOut,
+    CouponTemplateUpdateIn,
+    EvaluationAppendIn,
+    EvaluationCreateIn,
+    EvaluationOut,
+    EvaluationReplyIn,
+    FavoriteAddIn,
+    FavoriteOut,
+    FavoriteStatusOut,
+    FootprintOut,
     GoodsCreate,
     GoodsDetailOut,
+    GoodsEvaluationListOut,
     GoodsOut,
     GoodsSkuOut,
     GoodsUpdate,
     OrderCreateIn,
     OrderOut,
+    OrderPreviewIn,
     OrderPreviewOut,
     PageOut,
     PaymentOut,
     PaymentPrepayIn,
     PaymentPrepayOut,
+    PendingEvaluationOut,
+    RefundCreateIn,
+    RefundHandleIn,
+    RefundOut,
+    RefundRejectIn,
+    ReturnTrackingIn,
     ShopApply,
     ShopOut,
     ShopPublicOut,
     ShopReviewIn,
     ShopUpdate,
     ShipOrderIn,
+    UserCouponOut,
     WalletLedgerOut,
     WalletOut,
     WithdrawCreateIn,
@@ -175,6 +205,35 @@ async def get_goods_detail(
         return data
 
     return await database_executor.run(_get)
+
+
+@router.get(
+    "/goods/{goods_id}/evaluations",
+    summary="商品评价列表与评分汇总",
+    response_model=GoodsEvaluationListOut,
+)
+async def list_goods_evaluations(
+    goods_id: int,
+    page: int = Query(1, ge=1),
+    page_size: int = Query(10, ge=1, le=50),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _list(db):
+        items, summary = service.list_goods_evaluations(db, goods_id, page, page_size)
+        return {
+            "items": service.evaluation_list_payloads(db, items),
+            "total": summary["total"],
+            "page": page,
+            "page_size": page_size,
+            "summary": {
+                "avg_rating": summary["avg_rating"],
+                "rating_count": summary["rating_count"],
+                "good_rate": summary["good_rate"],
+                "total": summary["total"],
+            },
+        }
+
+    return await database_executor.run(_list)
 
 
 @router.get("/shops/{shop_id}", summary="店铺信息", response_model=ShopPublicOut)
@@ -336,18 +395,22 @@ def _order_response(db: Session, order) -> dict:
 
 @router.post("/orders/preview", summary="订单预览", response_model=OrderPreviewOut)
 async def preview_order(
-    payload: OrderCreateIn,
+    payload: OrderPreviewIn,
     current_user: AuthenticatedPrincipal = Depends(_require_login),
     database_executor: DatabaseExecutor = Depends(get_database_executor),
 ):
     def _preview(db):
         result = service.preview_order(
-            db, current_user.user_id, [item.model_dump() for item in payload.items]
+            db,
+            current_user.user_id,
+            [item.model_dump() for item in payload.items],
+            coupon_id=payload.coupon_id,
         )
         return {
             "items": result["items"],
             "goods_amount_fen": result["goods_amount_fen"],
             "freight_fen": result["freight_fen"],
+            "coupon_discount_fen": result["coupon_discount_fen"],
             "pay_amount_fen": result["pay_amount_fen"],
         }
 
@@ -375,6 +438,7 @@ async def create_order(
             items=[item.model_dump() for item in payload.items],
             cart_item_ids=payload.cart_item_ids,
             remark=payload.remark,
+            coupon_id=payload.coupon_id,
         )
         return _order_response(db, order)
 
@@ -383,7 +447,7 @@ async def create_order(
 
 @router.get("/orders", summary="我的订单", response_model=PageOut[OrderOut])
 async def list_my_orders(
-    order_status: Literal["pending_payment", "paid", "shipped", "completed", "cancelled"] | None = Query(default=None, alias="status"),
+    order_status: Literal["pending_payment", "paid", "shipped", "completed", "cancelled", "refunding", "refunded"] | None = Query(default=None, alias="status"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     current_user: AuthenticatedPrincipal = Depends(_require_login),
@@ -558,6 +622,447 @@ async def wechat_pay_notify(
         )
     )
     return JSONResponse({"code": "SUCCESS", "message": "成功"})
+
+
+@router.post(
+    "/payments/wechat/refund-notify",
+    summary="微信退款回调",
+    description="微信退款结果通知；验签失败返回 400，退款成功幂等入账。",
+    include_in_schema=False,
+)
+async def wechat_refund_notify(
+    request: Request,
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+) -> JSONResponse:
+    from .payment import get_payment_provider
+
+    provider = get_payment_provider()
+    if provider.is_mock:
+        return JSONResponse({"code": "FAIL", "message": "mock 模式不接收回调"})
+    body = await request.body()
+    headers = dict(request.headers)
+    data = provider.verify_notification(headers, body)
+    if not data:
+        return JSONResponse(status_code=status.HTTP_400_BAD_REQUEST, content={"code": "FAIL", "message": "验签失败"})
+    resource = data.get("resource") or {}
+    out_refund_no = resource.get("out_refund_no")
+    refund_status = resource.get("refund_status")
+    channel_refund_id = resource.get("refund_id")
+    if not out_refund_no:
+        return JSONResponse({"code": "FAIL", "message": "缺少商户退款单号"})
+    await database_executor.run(
+        lambda db: service.handle_refund_notification(
+            db,
+            out_refund_no=out_refund_no,
+            refund_status=refund_status or "",
+            channel_refund_id=channel_refund_id,
+        )
+    )
+    return JSONResponse({"code": "SUCCESS", "message": "成功"})
+
+
+# ---------------------------------------------------------------------------
+# 买家：退款 / 售后
+# ---------------------------------------------------------------------------
+
+
+def _refund_response(db: Session, refund) -> dict:
+    return service.refund_detail_payload(db, refund)
+
+
+@router.post(
+    "/refunds",
+    summary="申请退款",
+    response_model=RefundOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def apply_refund(
+    payload: RefundCreateIn,
+    runtime: TaskRuntime = Depends(get_task_runtime),
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _apply(db):
+        refund = service.apply_refund(
+            db,
+            runtime,
+            current_user.user_id,
+            order_no=payload.order_no,
+            type=payload.type,
+            reason=payload.reason,
+            description=payload.description,
+            evidence_images=payload.evidence_images,
+        )
+        return _refund_response(db, refund)
+
+    return await database_executor.run(_apply)
+
+
+@router.get("/refunds", summary="我的退款申请", response_model=PageOut[RefundOut])
+async def list_my_refunds(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _list(db):
+        refunds, total = service.list_my_refunds(
+            db, current_user.user_id, page, page_size
+        )
+        return {
+            "items": [_refund_response(db, refund) for refund in refunds],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    return await database_executor.run(_list)
+
+
+@router.get("/refunds/{refund_no}", summary="退款申请详情", response_model=RefundOut)
+async def get_my_refund(
+    refund_no: str,
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _get(db):
+        refund = service.get_my_refund(db, current_user.user_id, refund_no)
+        return _refund_response(db, refund)
+
+    return await database_executor.run(_get)
+
+
+@router.post("/refunds/{refund_no}/cancel", summary="取消退款申请", response_model=RefundOut)
+async def cancel_refund(
+    refund_no: str,
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _cancel(db):
+        refund = service.cancel_refund(db, current_user.user_id, refund_no)
+        return _refund_response(db, refund)
+
+    return await database_executor.run(_cancel)
+
+
+@router.post(
+    "/refunds/{refund_no}/return-tracking",
+    summary="填写退货物流",
+    response_model=RefundOut,
+)
+async def submit_return_tracking(
+    refund_no: str,
+    payload: ReturnTrackingIn,
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _submit(db):
+        refund = service.submit_return_tracking(
+            db,
+            current_user.user_id,
+            refund_no,
+            company=payload.return_tracking_company,
+            tracking_no=payload.return_tracking_no,
+        )
+        return _refund_response(db, refund)
+
+    return await database_executor.run(_submit)
+
+
+# ---------------------------------------------------------------------------
+# 买家：商品评价 / 晒单
+# ---------------------------------------------------------------------------
+
+
+def _evaluation_response(db: Session, evaluation) -> dict:
+    return service.evaluation_payload(db, evaluation)
+
+
+@router.post(
+    "/orders/{order_no}/evaluations",
+    summary="发表商品评价",
+    response_model=EvaluationOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_evaluation(
+    order_no: str,
+    payload: EvaluationCreateIn,
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _create(db):
+        evaluation = service.create_evaluation(
+            db,
+            current_user.user_id,
+            order_no=order_no,
+            order_item_id=payload.order_item_id,
+            rating=payload.rating,
+            content=payload.content,
+            images=payload.images,
+        )
+        return _evaluation_response(db, evaluation)
+
+    return await database_executor.run(_create)
+
+
+@router.get(
+    "/evaluations/pending",
+    summary="待评价商品列表",
+    response_model=list[PendingEvaluationOut],
+)
+async def list_pending_evaluations(
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    return await database_executor.run(
+        lambda db: service.list_pending_evaluations(db, current_user.user_id)
+    )
+
+
+@router.get(
+    "/evaluations/mine",
+    summary="我的已评价列表",
+    response_model=PageOut[EvaluationOut],
+)
+async def list_my_evaluations(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _list(db):
+        items, total = service.list_my_evaluations(
+            db, current_user.user_id, page, page_size
+        )
+        return {
+            "items": service.evaluation_list_payloads(db, items),
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    return await database_executor.run(_list)
+
+
+@router.post(
+    "/evaluations/{evaluation_id}/append",
+    summary="追评",
+    response_model=EvaluationOut,
+)
+async def append_evaluation(
+    evaluation_id: int,
+    payload: EvaluationAppendIn,
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _append(db):
+        evaluation = service.append_evaluation(
+            db,
+            current_user.user_id,
+            evaluation_id,
+            content=payload.content,
+            images=payload.images,
+        )
+        return _evaluation_response(db, evaluation)
+
+    return await database_executor.run(_append)
+
+
+# ---------------------------------------------------------------------------
+# 买家：收藏/关注 + 浏览足迹
+# ---------------------------------------------------------------------------
+
+
+@router.post(
+    "/favorites",
+    summary="收藏商品/关注店铺",
+    response_model=FavoriteOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def add_favorite(
+    payload: FavoriteAddIn,
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _add(db):
+        favorite = service.add_favorite(
+            db,
+            current_user.user_id,
+            target_type=payload.target_type,
+            target_id=payload.target_id,
+        )
+        return service.favorite_payload(db, favorite)
+
+    return await database_executor.run(_add)
+
+
+@router.delete("/favorites", summary="取消收藏/取关店铺")
+async def remove_favorite(
+    target_type: FavoriteTargetType,
+    target_id: int = Query(..., gt=0),
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _remove(db):
+        service.remove_favorite(
+            db,
+            current_user.user_id,
+            target_type=target_type,
+            target_id=target_id,
+        )
+        return {"ok": True}
+
+    return await database_executor.run(_remove)
+
+
+@router.get("/favorites", summary="我的收藏列表", response_model=PageOut[FavoriteOut])
+async def list_my_favorites(
+    target_type: FavoriteTargetType | None = Query(default=None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _list(db):
+        items, total = service.list_my_favorites(
+            db,
+            current_user.user_id,
+            target_type=target_type,
+            page=page,
+            page_size=page_size,
+        )
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    return await database_executor.run(_list)
+
+
+@router.get(
+    "/favorites/status",
+    summary="查询收藏状态",
+    response_model=FavoriteStatusOut,
+)
+async def get_favorite_status(
+    target_type: FavoriteTargetType,
+    target_id: int = Query(..., gt=0),
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _status(db):
+        favorited = service.is_favorited(
+            db, current_user.user_id, target_type=target_type, target_id=target_id
+        )
+        return {"favorited": favorited}
+
+    return await database_executor.run(_status)
+
+
+@router.post("/footprints", summary="记录浏览足迹")
+async def record_footprint(
+    goods_id: int = Query(..., gt=0),
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _record(db):
+        service.record_footprint(db, current_user.user_id, goods_id=goods_id)
+        return {"ok": True}
+
+    return await database_executor.run(_record)
+
+
+@router.get("/footprints", summary="我的浏览足迹", response_model=PageOut[FootprintOut])
+async def list_my_footprints(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _list(db):
+        items, total = service.list_my_footprints(
+            db, current_user.user_id, page, page_size
+        )
+        return {
+            "items": items,
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    return await database_executor.run(_list)
+
+
+# ---------------------------------------------------------------------------
+# 买家：优惠券
+# ---------------------------------------------------------------------------
+
+
+@router.get("/coupons", summary="领券中心", response_model=PageOut[CouponTemplateOut])
+async def list_available_coupons(
+    scope: Literal["platform", "shop"] | None = Query(default=None),
+    shop_id: int | None = Query(default=None),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _list(db):
+        scope_filter = CouponScope(scope) if scope else None
+        items, total = service.list_available_coupons(
+            db, scope=scope_filter, shop_id=shop_id, page=page, page_size=page_size
+        )
+        return {
+            "items": [service.coupon_payload(db, c) for c in items],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    return await database_executor.run(_list)
+
+
+@router.post(
+    "/coupons/{coupon_id}/receive",
+    summary="领取优惠券",
+    response_model=UserCouponOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def receive_coupon(
+    coupon_id: int,
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _receive(db):
+        user_coupon = service.receive_coupon(db, current_user.user_id, coupon_id)
+        return service.user_coupon_payload(db, user_coupon)
+
+    return await database_executor.run(_receive)
+
+
+@router.get("/coupons/mine", summary="我的优惠券", response_model=PageOut[UserCouponOut])
+async def list_my_coupons(
+    coupon_status: Literal["unused", "used", "expired"] | None = Query(default=None, alias="status"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _list(db):
+        status_filter = UserCouponStatus(coupon_status) if coupon_status else None
+        items, total = service.list_my_coupons(
+            db, current_user.user_id, status_filter=status_filter, page=page, page_size=page_size
+        )
+        return {
+            "items": [service.user_coupon_payload(db, c) for c in items],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    return await database_executor.run(_list)
 
 
 # ---------------------------------------------------------------------------
@@ -814,7 +1319,7 @@ async def seller_delete_goods(
 
 @seller_router.get("/orders", summary="店铺订单列表", response_model=PageOut[OrderOut])
 async def seller_list_orders(
-    order_status: Literal["pending_payment", "paid", "shipped", "completed", "cancelled"] | None = Query(default=None, alias="status"),
+    order_status: Literal["pending_payment", "paid", "shipped", "completed", "cancelled", "refunding", "refunded"] | None = Query(default=None, alias="status"),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     shop_id: int | None = Depends(_seller_shop_id_param),
@@ -872,6 +1377,236 @@ async def seller_ship_order(
         return _order_response(db, order)
 
     return await database_executor.run(_ship)
+
+
+# ---------------------------------------------------------------------------
+# 商家：退款 / 售后
+# ---------------------------------------------------------------------------
+
+
+@seller_router.get("/refunds", summary="店铺退款申请列表", response_model=PageOut[RefundOut])
+async def seller_list_refunds(
+    refund_status: Literal["pending", "returning", "refunding", "success", "rejected", "cancelled"] | None = Query(default=None, alias="status"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    shop_id: int | None = Depends(_seller_shop_id_param),
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _list(db):
+        status_filter = RefundStatus(refund_status) if refund_status else None
+        refunds, total = service.seller_list_refunds(
+            db, current_user, status_filter=status_filter, page=page, page_size=page_size, shop_id=shop_id
+        )
+        return {
+            "items": [_refund_response(db, refund) for refund in refunds],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    return await database_executor.run(_list)
+
+
+@seller_router.get("/refunds/{refund_no}", summary="店铺退款申请详情", response_model=RefundOut)
+async def seller_get_refund(
+    refund_no: str,
+    shop_id: int | None = Depends(_seller_shop_id_param),
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _get(db):
+        refund = service.seller_get_refund(db, current_user, refund_no, shop_id=shop_id)
+        return _refund_response(db, refund)
+
+    return await database_executor.run(_get)
+
+
+@seller_router.post("/refunds/{refund_no}/agree", summary="同意退款", response_model=RefundOut)
+async def seller_agree_refund(
+    refund_no: str,
+    shop_id: int | None = Depends(_seller_shop_id_param),
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _agree(db):
+        refund = service.seller_agree_refund(db, current_user, refund_no, shop_id=shop_id)
+        return _refund_response(db, refund)
+
+    return await database_executor.run(_agree)
+
+
+@seller_router.post("/refunds/{refund_no}/reject", summary="拒绝退款", response_model=RefundOut)
+async def seller_reject_refund(
+    refund_no: str,
+    payload: RefundRejectIn,
+    shop_id: int | None = Depends(_seller_shop_id_param),
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _reject(db):
+        refund = service.seller_reject_refund(
+            db, current_user, refund_no, reason=payload.reason, shop_id=shop_id
+        )
+        return _refund_response(db, refund)
+
+    return await database_executor.run(_reject)
+
+
+@seller_router.post(
+    "/refunds/{refund_no}/confirm-return",
+    summary="确认收到退货并发起退款",
+    response_model=RefundOut,
+)
+async def seller_confirm_return(
+    refund_no: str,
+    shop_id: int | None = Depends(_seller_shop_id_param),
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _confirm(db):
+        refund = service.seller_confirm_return(db, current_user, refund_no, shop_id=shop_id)
+        return _refund_response(db, refund)
+
+    return await database_executor.run(_confirm)
+
+
+# ---------------------------------------------------------------------------
+# 商家：商品评价
+# ---------------------------------------------------------------------------
+
+
+@seller_router.get(
+    "/evaluations",
+    summary="店铺评价列表",
+    response_model=PageOut[EvaluationOut],
+)
+async def seller_list_evaluations(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    shop_id: int | None = Depends(_seller_shop_id_param),
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _list(db):
+        items, total = service.seller_list_evaluations(
+            db, current_user, page=page, page_size=page_size, shop_id=shop_id
+        )
+        return {
+            "items": service.evaluation_list_payloads(db, items),
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    return await database_executor.run(_list)
+
+
+@seller_router.post(
+    "/evaluations/{evaluation_id}/reply",
+    summary="回复评价",
+    response_model=EvaluationOut,
+)
+async def seller_reply_evaluation(
+    evaluation_id: int,
+    payload: EvaluationReplyIn,
+    shop_id: int | None = Depends(_seller_shop_id_param),
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _reply(db):
+        evaluation = service.seller_reply_evaluation(
+            db,
+            current_user,
+            evaluation_id,
+            content=payload.content,
+            shop_id=shop_id,
+        )
+        return _evaluation_response(db, evaluation)
+
+    return await database_executor.run(_reply)
+
+
+# ---------------------------------------------------------------------------
+# 商家：优惠券
+# ---------------------------------------------------------------------------
+
+
+@seller_router.get("/coupons", summary="店铺优惠券列表", response_model=PageOut[CouponTemplateOut])
+async def seller_list_coupons(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    shop_id: int | None = Depends(_seller_shop_id_param),
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _list(db):
+        items, total = service.seller_list_coupons(
+            db, current_user, page=page, page_size=page_size, shop_id=shop_id
+        )
+        return {
+            "items": [service.coupon_payload(db, c) for c in items],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    return await database_executor.run(_list)
+
+
+@seller_router.post(
+    "/coupons",
+    summary="新建店铺优惠券",
+    response_model=CouponTemplateOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def seller_create_coupon(
+    payload: CouponTemplateCreateIn,
+    shop_id: int | None = Depends(_seller_shop_id_param),
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _create(db):
+        coupon = service.seller_create_coupon(
+            db, current_user, payload.model_dump(), shop_id=shop_id
+        )
+        return service.coupon_payload(db, coupon)
+
+    return await database_executor.run(_create)
+
+
+@seller_router.put("/coupons/{coupon_id}", summary="更新店铺优惠券", response_model=CouponTemplateOut)
+async def seller_update_coupon(
+    coupon_id: int,
+    payload: CouponTemplateUpdateIn,
+    shop_id: int | None = Depends(_seller_shop_id_param),
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _update(db):
+        coupon = service.seller_update_coupon(
+            db, current_user, coupon_id, payload.model_dump(exclude_none=True), shop_id=shop_id
+        )
+        return service.coupon_payload(db, coupon)
+
+    return await database_executor.run(_update)
+
+
+@seller_router.post("/coupons/{coupon_id}/status", summary="上下架店铺优惠券", response_model=CouponTemplateOut)
+async def seller_set_coupon_status(
+    coupon_id: int,
+    on: bool = Query(...),
+    shop_id: int | None = Depends(_seller_shop_id_param),
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _set(db):
+        coupon = service.seller_set_coupon_status(
+            db, current_user, coupon_id, on=on, shop_id=shop_id
+        )
+        return service.coupon_payload(db, coupon)
+
+    return await database_executor.run(_set)
 
 
 # ---------------------------------------------------------------------------
@@ -1097,6 +1832,160 @@ async def admin_close_shop(
         return ShopOut.model_validate(shop)
 
     return await database_executor.run(_close)
+
+
+@admin_router.get("/refunds", summary="退款申请列表", response_model=PageOut[RefundOut])
+async def admin_list_refunds(
+    refund_status: Literal["pending", "returning", "refunding", "success", "rejected", "cancelled"] | None = Query(default=None, alias="status"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    _: AuthenticatedPrincipal = Security(get_current_admin),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _list(db):
+        status_filter = RefundStatus(refund_status) if refund_status else None
+        refunds, total = service.admin_list_refunds(
+            db, status_filter=status_filter, page=page, page_size=page_size
+        )
+        return {
+            "items": [_refund_response(db, refund) for refund in refunds],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    return await database_executor.run(_list)
+
+
+@admin_router.post("/refunds/{refund_id}/handle", summary="仲裁退款申请", response_model=RefundOut)
+async def admin_handle_refund(
+    request: Request,
+    refund_id: int,
+    payload: RefundHandleIn,
+    current_admin: AuthenticatedPrincipal = Security(get_current_admin),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _handle(db):
+        item = service.admin_handle_refund(
+            db,
+            refund_id,
+            approved=payload.approved,
+            reject_reason=payload.reject_reason,
+            handler_user_id=current_admin.user_id,
+        )
+        from src.server.audit import service as audit_service
+
+        audit_service.attach_audit_context(
+            request.state,
+            action="mall.refund.handle",
+            resource_type="refund",
+            resource_id=item.id,
+            target_summary=item.refund_no,
+        )
+        return _refund_response(db, item)
+
+    return await database_executor.run(_handle)
+
+
+@admin_router.get("/coupons", summary="平台优惠券列表", response_model=PageOut[CouponTemplateOut])
+async def admin_list_coupons(
+    coupon_status: Literal["active", "paused", "expired"] | None = Query(default=None, alias="status"),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    _: AuthenticatedPrincipal = Security(get_current_admin),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _list(db):
+        status_filter = CouponStatus(coupon_status) if coupon_status else None
+        items, total = service.admin_list_coupons(
+            db, status_filter=status_filter, page=page, page_size=page_size
+        )
+        return {
+            "items": [service.coupon_payload(db, c) for c in items],
+            "total": total,
+            "page": page,
+            "page_size": page_size,
+        }
+
+    return await database_executor.run(_list)
+
+
+@admin_router.post(
+    "/coupons",
+    summary="创建平台/店铺优惠券",
+    response_model=CouponTemplateOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def admin_create_coupon(
+    request: Request,
+    payload: CouponTemplateCreateIn,
+    current_admin: AuthenticatedPrincipal = Security(get_current_admin),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _create(db):
+        coupon = service.admin_create_coupon(db, payload.model_dump())
+        from src.server.audit import service as audit_service
+
+        audit_service.attach_audit_context(
+            request.state,
+            action="mall.coupon.create",
+            resource_type="coupon",
+            resource_id=coupon.id,
+            target_summary=coupon.name,
+        )
+        return service.coupon_payload(db, coupon)
+
+    return await database_executor.run(_create)
+
+
+@admin_router.put("/coupons/{coupon_id}", summary="更新优惠券", response_model=CouponTemplateOut)
+async def admin_update_coupon(
+    request: Request,
+    coupon_id: int,
+    payload: CouponTemplateUpdateIn,
+    current_admin: AuthenticatedPrincipal = Security(get_current_admin),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _update(db):
+        coupon = service.admin_update_coupon(
+            db, coupon_id, payload.model_dump(exclude_none=True)
+        )
+        from src.server.audit import service as audit_service
+
+        audit_service.attach_audit_context(
+            request.state,
+            action="mall.coupon.update",
+            resource_type="coupon",
+            resource_id=coupon.id,
+            target_summary=coupon.name,
+        )
+        return service.coupon_payload(db, coupon)
+
+    return await database_executor.run(_update)
+
+
+@admin_router.post("/coupons/{coupon_id}/status", summary="上下架优惠券", response_model=CouponTemplateOut)
+async def admin_set_coupon_status(
+    request: Request,
+    coupon_id: int,
+    on: bool = Query(...),
+    current_admin: AuthenticatedPrincipal = Security(get_current_admin),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _set(db):
+        coupon = service.admin_set_coupon_status(db, coupon_id, on=on)
+        from src.server.audit import service as audit_service
+
+        audit_service.attach_audit_context(
+            request.state,
+            action="mall.coupon.status",
+            resource_type="coupon",
+            resource_id=coupon.id,
+            target_summary=coupon.name,
+        )
+        return service.coupon_payload(db, coupon)
+
+    return await database_executor.run(_set)
 
 
 @admin_router.get("/withdrawals", summary="提现申请列表", response_model=PageOut[WithdrawOut])

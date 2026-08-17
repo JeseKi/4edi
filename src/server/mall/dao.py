@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from typing import Any
 
-from sqlalchemy import and_, false, func, or_
+from sqlalchemy import and_, case, false, func, or_
 
 from src.server.dao.dao_base import BaseDAO
 
@@ -15,13 +15,23 @@ from .models import (
     CartItem,
     Category,
     ChatMessage,
+    CouponScope,
+    CouponStatus,
+    CouponTemplate,
+    Evaluation,
+    Favorite,
+    FavoriteTargetType,
+    Footprint,
     Goods,
     GoodsSku,
     Order,
     OrderItem,
     OrderLog,
     Payment,
+    Refund,
     Shop,
+    UserCoupon,
+    UserCouponStatus,
     Wallet,
     WalletLedger,
     WithdrawRequest,
@@ -30,6 +40,7 @@ from .models import (
     ChatSenderType,
     GoodsStatus,
     OrderStatus,
+    RefundStatus,
     ShopStatus,
     WithdrawStatus,
 )
@@ -391,6 +402,9 @@ class OrderDAO(BaseDAO):
         self.db_session.flush()
         return order
 
+    def get(self, order_id: int) -> Order | None:
+        return self.db_session.query(Order).filter(Order.id == order_id).first()
+
     def get_by_no(self, order_no: str) -> Order | None:
         return (
             self.db_session.query(Order).filter(Order.order_no == order_no).first()
@@ -448,6 +462,15 @@ class OrderDAO(BaseDAO):
         )
         return orders, total
 
+    def list_completed_for_buyer(self, buyer_id: int) -> list[Order]:
+        """买家已确认收货的订单（评价入口）。"""
+        return (
+            self.db_session.query(Order)
+            .filter(Order.buyer_id == buyer_id, Order.status == OrderStatus.COMPLETED)
+            .order_by(Order.completed_at.desc())
+            .all()
+        )
+
 
 class OrderItemDAO(BaseDAO):
     def create_many(
@@ -485,6 +508,139 @@ class OrderItemDAO(BaseDAO):
             .order_by(OrderItem.id.asc())
             .all()
         )
+
+    def get(self, order_id: int, item_id: int) -> OrderItem | None:
+        return (
+            self.db_session.query(OrderItem)
+            .filter(OrderItem.id == item_id, OrderItem.order_id == order_id)
+            .first()
+        )
+
+
+class EvaluationDAO(BaseDAO):
+    def create(
+        self,
+        *,
+        order_id: int,
+        order_item_id: int,
+        goods_id: int,
+        shop_id: int,
+        buyer_id: int,
+        rating: int,
+        content: str,
+        images: list,
+    ) -> Evaluation:
+        evaluation = Evaluation(
+            order_id=order_id,
+            order_item_id=order_item_id,
+            goods_id=goods_id,
+            shop_id=shop_id,
+            buyer_id=buyer_id,
+            rating=rating,
+            content=content,
+            images=images,
+        )
+        self.db_session.add(evaluation)
+        self.db_session.flush()
+        return evaluation
+
+    def get(self, evaluation_id: int) -> Evaluation | None:
+        return (
+            self.db_session.query(Evaluation)
+            .filter(Evaluation.id == evaluation_id)
+            .first()
+        )
+
+    def get_for_buyer(self, evaluation_id: int, buyer_id: int) -> Evaluation | None:
+        return (
+            self.db_session.query(Evaluation)
+            .filter(Evaluation.id == evaluation_id, Evaluation.buyer_id == buyer_id)
+            .first()
+        )
+
+    def get_for_shop(self, evaluation_id: int, shop_id: int) -> Evaluation | None:
+        return (
+            self.db_session.query(Evaluation)
+            .filter(Evaluation.id == evaluation_id, Evaluation.shop_id == shop_id)
+            .first()
+        )
+
+    def get_by_order_item(self, order_id: int, order_item_id: int) -> Evaluation | None:
+        return (
+            self.db_session.query(Evaluation)
+            .filter(
+                Evaluation.order_id == order_id,
+                Evaluation.order_item_id == order_item_id,
+            )
+            .first()
+        )
+
+    def list_by_order(self, order_id: int) -> list[Evaluation]:
+        return (
+            self.db_session.query(Evaluation)
+            .filter(Evaluation.order_id == order_id)
+            .order_by(Evaluation.id.asc())
+            .all()
+        )
+
+    def list_by_goods(
+        self, goods_id: int, page: int, page_size: int
+    ) -> tuple[list[Evaluation], int]:
+        query = self.db_session.query(Evaluation).filter(Evaluation.goods_id == goods_id)
+        total = query.count()
+        items = (
+            query.order_by(Evaluation.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        return items, total
+
+    def rating_summary(self, goods_id: int) -> dict:
+        row = (
+            self.db_session.query(
+                func.count(Evaluation.id),
+                func.avg(Evaluation.rating),
+                func.sum(case((Evaluation.rating >= 4, 1), else_=0)),
+            )
+            .filter(Evaluation.goods_id == goods_id)
+            .one()
+        )
+        total = int(row[0] or 0)
+        avg = float(row[1]) if row[1] is not None else 0.0
+        good = int(row[2] or 0)
+        good_rate = round(good / total * 100, 1) if total else 0.0
+        return {
+            "avg_rating": round(avg, 1),
+            "rating_count": total,
+            "good_rate": good_rate,
+        }
+
+    def list_by_buyer(
+        self, buyer_id: int, page: int, page_size: int
+    ) -> tuple[list[Evaluation], int]:
+        query = self.db_session.query(Evaluation).filter(Evaluation.buyer_id == buyer_id)
+        total = query.count()
+        items = (
+            query.order_by(Evaluation.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        return items, total
+
+    def list_for_shop(
+        self, shop_id: int, page: int, page_size: int
+    ) -> tuple[list[Evaluation], int]:
+        query = self.db_session.query(Evaluation).filter(Evaluation.shop_id == shop_id)
+        total = query.count()
+        items = (
+            query.order_by(Evaluation.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        return items, total
 
 
 class OrderLogDAO(BaseDAO):
@@ -787,3 +943,454 @@ class ChatMessageDAO(BaseDAO):
             query = query.filter(ChatMessage.order_no == order_no)
         updated = query.update({ChatMessage.read_at: _utcnow()}, synchronize_session=False)
         return int(updated)
+
+
+class RefundDAO(BaseDAO):
+    def create(
+        self,
+        *,
+        refund_no: str,
+        order_no: str,
+        shop_id: int,
+        buyer_id: int,
+        type: Any,
+        status: Any,
+        order_status_snapshot: Any,
+        reason: str,
+        description: str | None,
+        evidence_images: list,
+        amount_fen: int,
+    ) -> Refund:
+        refund = Refund(
+            refund_no=refund_no,
+            order_no=order_no,
+            shop_id=shop_id,
+            buyer_id=buyer_id,
+            type=type,
+            status=status,
+            order_status_snapshot=order_status_snapshot,
+            reason=reason,
+            description=description,
+            evidence_images=evidence_images,
+            amount_fen=amount_fen,
+        )
+        self.db_session.add(refund)
+        self.db_session.flush()
+        return refund
+
+    def get(self, refund_id: int) -> Refund | None:
+        return self.db_session.query(Refund).filter(Refund.id == refund_id).first()
+
+    def lock(self, refund_id: int) -> Refund | None:
+        return (
+            self.db_session.query(Refund)
+            .filter(Refund.id == refund_id)
+            .with_for_update()
+            .first()
+        )
+
+    def get_by_no(self, refund_no: str) -> Refund | None:
+        return (
+            self.db_session.query(Refund)
+            .filter(Refund.refund_no == refund_no)
+            .first()
+        )
+
+    def lock_by_no(self, refund_no: str) -> Refund | None:
+        return (
+            self.db_session.query(Refund)
+            .filter(Refund.refund_no == refund_no)
+            .with_for_update()
+            .first()
+        )
+
+    def get_for_buyer(self, refund_no: str, buyer_id: int) -> Refund | None:
+        return (
+            self.db_session.query(Refund)
+            .filter(Refund.refund_no == refund_no, Refund.buyer_id == buyer_id)
+            .first()
+        )
+
+    def get_for_shop(self, refund_no: str, shop_id: int) -> Refund | None:
+        return (
+            self.db_session.query(Refund)
+            .filter(Refund.refund_no == refund_no, Refund.shop_id == shop_id)
+            .first()
+        )
+
+    def find_active_by_order(self, order_no: str) -> Refund | None:
+        """查找订单进行中的退款单（待处理/退货中/退款中）。"""
+        return (
+            self.db_session.query(Refund)
+            .filter(
+                Refund.order_no == order_no,
+                Refund.status.in_(
+                    (RefundStatus.PENDING, RefundStatus.RETURNING, RefundStatus.REFUNDING)
+                ),
+            )
+            .first()
+        )
+
+    def list_for_buyer(
+        self, buyer_id: int, page: int, page_size: int
+    ) -> tuple[list[Refund], int]:
+        query = self.db_session.query(Refund).filter(Refund.buyer_id == buyer_id)
+        total = query.count()
+        items = (
+            query.order_by(Refund.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        return items, total
+
+    def list_for_shop(
+        self,
+        shop_id: int,
+        status: RefundStatus | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[Refund], int]:
+        query = self.db_session.query(Refund).filter(Refund.shop_id == shop_id)
+        if status is not None:
+            query = query.filter(Refund.status == status)
+        total = query.count()
+        items = (
+            query.order_by(Refund.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        return items, total
+
+    def list_all(
+        self, status: RefundStatus | None, page: int, page_size: int
+    ) -> tuple[list[Refund], int]:
+        query = self.db_session.query(Refund)
+        if status is not None:
+            query = query.filter(Refund.status == status)
+        total = query.count()
+        items = (
+            query.order_by(Refund.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        return items, total
+
+
+class CouponTemplateDAO(BaseDAO):
+    def create(
+        self,
+        *,
+        name: str,
+        type: Any,
+        value_fen: int,
+        discount: int,
+        min_amount_fen: int,
+        scope: Any,
+        shop_id: int | None,
+        total_count: int,
+        per_user_limit: int,
+        valid_from: datetime,
+        valid_until: datetime,
+    ) -> CouponTemplate:
+        coupon = CouponTemplate(
+            name=name,
+            type=type,
+            value_fen=value_fen,
+            discount=discount,
+            min_amount_fen=min_amount_fen,
+            scope=scope,
+            shop_id=shop_id,
+            total_count=total_count,
+            per_user_limit=per_user_limit,
+            valid_from=valid_from,
+            valid_until=valid_until,
+            status=CouponStatus.ACTIVE,
+        )
+        self.db_session.add(coupon)
+        self.db_session.flush()
+        return coupon
+
+    def get(self, coupon_id: int) -> CouponTemplate | None:
+        return (
+            self.db_session.query(CouponTemplate)
+            .filter(CouponTemplate.id == coupon_id)
+            .first()
+        )
+
+    def lock(self, coupon_id: int) -> CouponTemplate | None:
+        return (
+            self.db_session.query(CouponTemplate)
+            .filter(CouponTemplate.id == coupon_id)
+            .with_for_update()
+            .first()
+        )
+
+    def get_for_shop(self, coupon_id: int, shop_id: int) -> CouponTemplate | None:
+        return (
+            self.db_session.query(CouponTemplate)
+            .filter(CouponTemplate.id == coupon_id, CouponTemplate.shop_id == shop_id)
+            .first()
+        )
+
+    def list_available(
+        self,
+        *,
+        scope: CouponScope | None,
+        shop_id: int | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[CouponTemplate], int]:
+        """领券中心：进行中的有效券（未暂停、未过期、未领完）。"""
+        now = _utcnow()
+        query = self.db_session.query(CouponTemplate).filter(
+            CouponTemplate.status == CouponStatus.ACTIVE,
+            CouponTemplate.valid_from <= now,
+            CouponTemplate.valid_until > now,
+            (CouponTemplate.total_count == 0)
+            | (CouponTemplate.received_count < CouponTemplate.total_count),
+        )
+        if scope is not None:
+            query = query.filter(CouponTemplate.scope == scope)
+        if shop_id is not None:
+            query = query.filter(CouponTemplate.shop_id == shop_id)
+        total = query.count()
+        items = (
+            query.order_by(CouponTemplate.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        return items, total
+
+    def list_for_shop(
+        self, shop_id: int, page: int, page_size: int
+    ) -> tuple[list[CouponTemplate], int]:
+        query = self.db_session.query(CouponTemplate).filter(
+            CouponTemplate.shop_id == shop_id
+        )
+        total = query.count()
+        items = (
+            query.order_by(CouponTemplate.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        return items, total
+
+    def list_all(
+        self,
+        status: CouponStatus | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[CouponTemplate], int]:
+        query = self.db_session.query(CouponTemplate)
+        if status is not None:
+            query = query.filter(CouponTemplate.status == status)
+        total = query.count()
+        items = (
+            query.order_by(CouponTemplate.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        return items, total
+
+    def mark_expired_by_until(self) -> int:
+        """把已过有效期的进行中模板置为过期。"""
+        updated = (
+            self.db_session.query(CouponTemplate)
+            .filter(
+                CouponTemplate.status.in_((CouponStatus.ACTIVE, CouponStatus.PAUSED)),
+                CouponTemplate.valid_until <= _utcnow(),
+            )
+            .update({CouponTemplate.status: CouponStatus.EXPIRED}, synchronize_session=False)
+        )
+        return int(updated)
+
+
+class UserCouponDAO(BaseDAO):
+    def create(
+        self,
+        *,
+        user_id: int,
+        coupon_id: int,
+        expired_at: datetime | None,
+    ) -> UserCoupon:
+        user_coupon = UserCoupon(
+            user_id=user_id,
+            coupon_id=coupon_id,
+            status=UserCouponStatus.UNUSED,
+            expired_at=expired_at,
+        )
+        self.db_session.add(user_coupon)
+        self.db_session.flush()
+        return user_coupon
+
+    def get(self, user_coupon_id: int) -> UserCoupon | None:
+        return (
+            self.db_session.query(UserCoupon)
+            .filter(UserCoupon.id == user_coupon_id)
+            .first()
+        )
+
+    def lock(self, user_coupon_id: int) -> UserCoupon | None:
+        return (
+            self.db_session.query(UserCoupon)
+            .filter(UserCoupon.id == user_coupon_id)
+            .with_for_update()
+            .first()
+        )
+
+    def get_for_user(self, user_id: int, coupon_id: int) -> UserCoupon | None:
+        return (
+            self.db_session.query(UserCoupon)
+            .filter(UserCoupon.user_id == user_id, UserCoupon.coupon_id == coupon_id)
+            .first()
+        )
+
+    def lock_for_user(self, user_id: int, coupon_id: int) -> UserCoupon | None:
+        return (
+            self.db_session.query(UserCoupon)
+            .filter(UserCoupon.user_id == user_id, UserCoupon.coupon_id == coupon_id)
+            .with_for_update()
+            .first()
+        )
+
+    def count_for_user(self, user_id: int, coupon_id: int) -> int:
+        return int(
+            self.db_session.query(func.count(UserCoupon.id))
+            .filter(UserCoupon.user_id == user_id, UserCoupon.coupon_id == coupon_id)
+            .scalar()
+            or 0
+        )
+
+    def mark_expired(self) -> int:
+        """把已过期未使用的用户券置为过期。"""
+        updated = (
+            self.db_session.query(UserCoupon)
+            .filter(
+                UserCoupon.status == UserCouponStatus.UNUSED,
+                UserCoupon.expired_at.isnot(None),
+                UserCoupon.expired_at <= _utcnow(),
+            )
+            .update({UserCoupon.status: UserCouponStatus.EXPIRED}, synchronize_session=False)
+        )
+        return int(updated)
+
+    def list_for_user(
+        self,
+        user_id: int,
+        status: UserCouponStatus | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[UserCoupon], int]:
+        query = self.db_session.query(UserCoupon).filter(UserCoupon.user_id == user_id)
+        if status is not None:
+            query = query.filter(UserCoupon.status == status)
+        total = query.count()
+        items = (
+            query.order_by(UserCoupon.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        return items, total
+
+    def list_unused_for_user(self, user_id: int) -> list[UserCoupon]:
+        return (
+            self.db_session.query(UserCoupon)
+            .filter(
+                UserCoupon.user_id == user_id,
+                UserCoupon.status == UserCouponStatus.UNUSED,
+            )
+            .order_by(UserCoupon.id.desc())
+            .all()
+        )
+
+
+class FavoriteDAO(BaseDAO):
+    def create(self, *, user_id: int, target_type: FavoriteTargetType, target_id: int) -> Favorite:
+        favorite = Favorite(user_id=user_id, target_type=target_type, target_id=target_id)
+        self.db_session.add(favorite)
+        self.db_session.flush()
+        return favorite
+
+    def get(
+        self, user_id: int, target_type: FavoriteTargetType, target_id: int
+    ) -> Favorite | None:
+        return (
+            self.db_session.query(Favorite)
+            .filter(
+                Favorite.user_id == user_id,
+                Favorite.target_type == target_type,
+                Favorite.target_id == target_id,
+            )
+            .first()
+        )
+
+    def delete(
+        self, user_id: int, target_type: FavoriteTargetType, target_id: int
+    ) -> bool:
+        deleted = (
+            self.db_session.query(Favorite)
+            .filter(
+                Favorite.user_id == user_id,
+                Favorite.target_type == target_type,
+                Favorite.target_id == target_id,
+            )
+            .delete(synchronize_session=False)
+        )
+        return bool(deleted)
+
+    def list_for_user(
+        self,
+        user_id: int,
+        target_type: FavoriteTargetType | None,
+        page: int,
+        page_size: int,
+    ) -> tuple[list[Favorite], int]:
+        query = self.db_session.query(Favorite).filter(Favorite.user_id == user_id)
+        if target_type is not None:
+            query = query.filter(Favorite.target_type == target_type)
+        total = query.count()
+        items = (
+            query.order_by(Favorite.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        return items, total
+
+
+class FootprintDAO(BaseDAO):
+    def upsert(self, *, user_id: int, goods_id: int, shop_id: int) -> Footprint:
+        """每用户每商品保留一条记录，重复浏览仅刷新 viewed_at。"""
+        footprint = (
+            self.db_session.query(Footprint)
+            .filter(Footprint.user_id == user_id, Footprint.goods_id == goods_id)
+            .first()
+        )
+        if footprint is None:
+            footprint = Footprint(user_id=user_id, goods_id=goods_id, shop_id=shop_id)
+            self.db_session.add(footprint)
+        else:
+            footprint.shop_id = shop_id
+            footprint.viewed_at = _utcnow()
+        self.db_session.flush()
+        return footprint
+
+    def list_for_user(
+        self, user_id: int, page: int, page_size: int
+    ) -> tuple[list[Footprint], int]:
+        query = self.db_session.query(Footprint).filter(Footprint.user_id == user_id)
+        total = query.count()
+        items = (
+            query.order_by(Footprint.viewed_at.desc(), Footprint.id.desc())
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+            .all()
+        )
+        return items, total

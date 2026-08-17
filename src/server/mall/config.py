@@ -20,6 +20,13 @@ class MallConfig(BaseModel):
         title="自动确认收货天数",
         description="发货后买家未确认收货时，超过该天数自动确认并解冻资金。",
     )
+    refund_auto_agree_hours: int = Field(
+        default=72,
+        ge=1,
+        le=720,
+        title="退款超时自动同意小时数",
+        description="买家提交退款申请后，卖家超过该时长未处理时系统自动同意。",
+    )
     default_deposit_fen: int = Field(
         default=1000,
         ge=0,

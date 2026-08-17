@@ -5,7 +5,10 @@ import {
   MessageOutlined,
   ProfileOutlined,
   ShopOutlined,
+  StarOutlined,
+  GiftOutlined,
   WalletOutlined,
+  UndoOutlined,
 } from '@ant-design/icons'
 import { useAuth } from '../../hooks/useAuth'
 
@@ -13,6 +16,9 @@ const MENUS = [
   { key: 'shop', path: '/mall/seller/shop', label: '店铺管理', icon: <ShopOutlined /> },
   { key: 'goods', path: '/mall/seller/goods', label: '商品管理', icon: <AppstoreOutlined /> },
   { key: 'orders', path: '/mall/seller/orders', label: '订单管理', icon: <ProfileOutlined /> },
+  { key: 'refunds', path: '/mall/seller/refunds', label: '退款管理', icon: <UndoOutlined /> },
+  { key: 'evaluations', path: '/mall/seller/evaluations', label: '评价管理', icon: <StarOutlined /> },
+  { key: 'coupons', path: '/mall/seller/coupons', label: '优惠券', icon: <GiftOutlined /> },
   { key: 'wallet', path: '/mall/seller/wallet', label: '资金钱包', icon: <WalletOutlined /> },
   { key: 'chat', path: '/mall/seller/chat', label: '客服消息', icon: <MessageOutlined /> },
 ]

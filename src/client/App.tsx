@@ -22,15 +22,24 @@ import CartPage from './pages/mall/CartPage'
 import CheckoutPage from './pages/mall/CheckoutPage'
 import OrdersPage from './pages/mall/OrdersPage'
 import OrderDetailPage from './pages/mall/OrderDetailPage'
+import RefundListPage from './pages/mall/RefundListPage'
+import EvaluationCenterPage from './pages/mall/EvaluationCenterPage'
+import CouponCenterPage from './pages/mall/CouponCenterPage'
+import FavoritesPage from './pages/mall/FavoritesPage'
+import FootprintsPage from './pages/mall/FootprintsPage'
 import ChatPage from './pages/mall/ChatPage'
 import SellerLayout from './components/mall/SellerLayout'
 import ShopManagePage from './pages/mall/seller/ShopManagePage'
 import GoodsManagePage from './pages/mall/seller/GoodsManagePage'
 import OrdersManagePage from './pages/mall/seller/OrdersManagePage'
+import RefundManagePage from './pages/mall/seller/RefundManagePage'
+import EvaluationManagePage from './pages/mall/seller/EvaluationManagePage'
+import CouponManagePage from './pages/mall/seller/CouponManagePage'
 import WalletPage from './pages/mall/seller/WalletPage'
 import SellerChatPage from './pages/mall/seller/SellerChatPage'
 import ShopReviewPage from './pages/mall/admin/ShopReviewPage'
 import WithdrawReviewPage from './pages/mall/admin/WithdrawReviewPage'
+import CouponAdminPage from './pages/mall/admin/CouponAdminPage'
 import { AuthProvider, RequireAdmin, RequireAuth } from './providers/AuthProvider'
 import { RuntimeConfigProvider } from './providers/RuntimeConfigProvider'
 import ThemeToggle from './components/theme/ThemeToggle'
@@ -49,7 +58,16 @@ function AppRoutes() {
   return (
     <>
       <Routes>
-        <Route path="/" element={<LandingPage />} />
+        <Route
+          path="/"
+          element={
+            hasFeature('mall') ? (
+              <Navigate to="/mall" replace />
+            ) : (
+              <LandingPage />
+            )
+          }
+        />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
@@ -86,6 +104,11 @@ function AppRoutes() {
             <Route path="/mall/checkout" element={<RequireAuth><CheckoutPage /></RequireAuth>} />
             <Route path="/mall/orders" element={<RequireAuth><OrdersPage /></RequireAuth>} />
             <Route path="/mall/orders/:orderNo" element={<RequireAuth><OrderDetailPage /></RequireAuth>} />
+            <Route path="/mall/refunds" element={<RequireAuth><RefundListPage /></RequireAuth>} />
+            <Route path="/mall/evaluations" element={<RequireAuth><EvaluationCenterPage /></RequireAuth>} />
+            <Route path="/mall/coupons" element={<RequireAuth><CouponCenterPage /></RequireAuth>} />
+            <Route path="/mall/favorites" element={<RequireAuth><FavoritesPage /></RequireAuth>} />
+            <Route path="/mall/footprints" element={<RequireAuth><FootprintsPage /></RequireAuth>} />
             <Route path="/mall/chat" element={<RequireAuth><ChatPage /></RequireAuth>} />
           </Route>
         )}
@@ -94,6 +117,9 @@ function AppRoutes() {
             <Route path="/mall/seller/shop" element={<ShopManagePage />} />
             <Route path="/mall/seller/goods" element={<GoodsManagePage />} />
             <Route path="/mall/seller/orders" element={<OrdersManagePage />} />
+            <Route path="/mall/seller/refunds" element={<RefundManagePage />} />
+            <Route path="/mall/seller/evaluations" element={<EvaluationManagePage />} />
+            <Route path="/mall/seller/coupons" element={<CouponManagePage />} />
             <Route path="/mall/seller/wallet" element={<WalletPage />} />
             <Route path="/mall/seller/chat" element={<SellerChatPage />} />
           </Route>
@@ -103,6 +129,9 @@ function AppRoutes() {
         )}
         {hasFeature('mall') && (
           <Route path="/mall/admin/withdrawals" element={<RequireAdmin><WithdrawReviewPage /></RequireAdmin>} />
+        )}
+        {hasFeature('mall') && (
+          <Route path="/mall/admin/coupons" element={<RequireAdmin><CouponAdminPage /></RequireAdmin>} />
         )}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

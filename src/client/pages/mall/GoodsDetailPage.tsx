@@ -1,11 +1,19 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
-import { App, Button, Divider, Empty, InputNumber, Spin, Tag } from 'antd'
-import { ShoppingCartOutlined } from '@ant-design/icons'
-import { addMallCartItem, getMallGoodsDetail } from '../../lib/mall'
+import { App, Button, Divider, Empty, InputNumber, Pagination, Rate, Spin, Tag } from 'antd'
+import { HeartFilled, HeartOutlined, ShoppingCartOutlined } from '@ant-design/icons'
+import {
+  addMallCartItem,
+  addMallFavorite,
+  getMallFavoriteStatus,
+  getMallGoodsDetail,
+  listGoodsEvaluations,
+  recordMallFootprint,
+  removeMallFavorite,
+} from '../../lib/mall'
 import { resolveApiErrorMessage } from '../../lib/error'
 import { formatFen } from '../../lib/mallFormat'
-import type { MallGoodsDetail, MallGoodsSku } from '../../lib/types'
+import type { GoodsEvaluationList, MallGoodsDetail, MallGoodsSku } from '../../lib/types'
 import { useAuth } from '../../hooks/useAuth'
 
 export default function GoodsDetailPage() {
@@ -17,17 +25,40 @@ export default function GoodsDetailPage() {
   const [loading, setLoading] = useState(true)
   const [selectedSku, setSelectedSku] = useState<MallGoodsSku | null>(null)
   const [quantity, setQuantity] = useState(1)
+  const [evaluations, setEvaluations] = useState<GoodsEvaluationList | null>(null)
+  const [evalLoading, setEvalLoading] = useState(false)
+  const [evalPage, setEvalPage] = useState(1)
+  const [favorited, setFavorited] = useState(false)
+
+  const goodsIdNum = Number(goodsId)
 
   useEffect(() => {
     setLoading(true)
-    getMallGoodsDetail(Number(goodsId))
+    getMallGoodsDetail(goodsIdNum)
       .then((detail) => {
         setGoods(detail)
         if (detail.skus.length === 1) setSelectedSku(detail.skus[0])
       })
       .catch((err) => message.error(resolveApiErrorMessage(err, '商品加载失败')))
       .finally(() => setLoading(false))
-  }, [goodsId, message])
+  }, [goodsIdNum, message])
+
+  useEffect(() => {
+    setEvalLoading(true)
+    listGoodsEvaluations(goodsIdNum, { page: evalPage, page_size: 5 })
+      .then(setEvaluations)
+      .catch((err) => message.error(resolveApiErrorMessage(err, '评价加载失败')))
+      .finally(() => setEvalLoading(false))
+  }, [goodsIdNum, evalPage, message])
+
+  // 登录后：查询收藏状态 + 静默记录浏览足迹
+  useEffect(() => {
+    if (!isAuthenticated || !goods) return
+    getMallFavoriteStatus('goods', goods.id)
+      .then(({ favorited: f }) => setFavorited(f))
+      .catch(() => {})
+    recordMallFootprint(goods.id).catch(() => {})
+  }, [isAuthenticated, goods, message])
 
   const specGroups = useMemo(() => {
     if (!goods) return []
@@ -79,6 +110,27 @@ export default function GoodsDetailPage() {
     navigate(`/mall/checkout?sku_id=${selectedSku.id}&quantity=${quantity}`)
   }
 
+  const handleToggleFavorite = async () => {
+    if (!goods) return
+    if (!isAuthenticated) {
+      navigate('/login', { state: { from: location.pathname } })
+      return
+    }
+    try {
+      if (favorited) {
+        await removeMallFavorite('goods', goods.id)
+        setFavorited(false)
+        message.success('已取消收藏')
+      } else {
+        await addMallFavorite({ target_type: 'goods', target_id: goods.id })
+        setFavorited(true)
+        message.success('收藏成功')
+      }
+    } catch (err) {
+      message.error(resolveApiErrorMessage(err, '操作失败'))
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex justify-center py-24">
@@ -92,7 +144,8 @@ export default function GoodsDetailPage() {
   }
 
   return (
-    <div className="flex gap-6 items-start">
+    <>
+      <div className="flex gap-6 items-start">
       <div
         className="shrink-0 rounded bg-white flex items-center justify-center overflow-hidden"
         style={{ width: 420, height: 420, border: '1px solid #f0f0f0' }}
@@ -184,6 +237,13 @@ export default function GoodsDetailPage() {
             <Button size="large" type="primary" onClick={handleBuyNow} style={{ background: '#F31947' }}>
               立即购买
             </Button>
+            <Button
+              size="large"
+              icon={favorited ? <HeartFilled style={{ color: '#F31947' }} /> : <HeartOutlined />}
+              onClick={handleToggleFavorite}
+            >
+              {favorited ? '已收藏' : '收藏'}
+            </Button>
           </div>
         ) : (
           <Tag color="default" className="py-1 px-3">
@@ -199,6 +259,87 @@ export default function GoodsDetailPage() {
           {goods.detail}
         </div>
       </div>
-    </div>
+      </div>
+
+      <section className="rounded bg-white flex-1" style={{ padding: '20px 24px' }}>
+        <h3 className="text-base font-bold mb-3" style={{ color: '#333' }}>
+          商品评价
+        </h3>
+        <Spin spinning={evalLoading}>
+          {evaluations && evaluations.summary.rating_count > 0 && (
+            <div className="flex items-center gap-4 rounded px-4 py-3 mb-4" style={{ background: '#fafafa' }}>
+              <div className="text-center">
+                <div className="text-3xl font-bold" style={{ color: '#F31947' }}>
+                  {evaluations.summary.avg_rating}
+                </div>
+                <Rate disabled value={evaluations.summary.avg_rating} allowHalf style={{ fontSize: 12 }} />
+              </div>
+              <div className="text-xs" style={{ color: '#999' }}>
+                <div>共 {evaluations.summary.rating_count} 条评价</div>
+                <div className="mt-1">好评率 {evaluations.summary.good_rate}%</div>
+              </div>
+            </div>
+          )}
+
+          {evaluations && evaluations.items.length === 0 ? (
+            <Empty description="暂无评价" image={Empty.PRESENTED_IMAGE_SIMPLE} style={{ margin: '32px 0' }} />
+          ) : (
+            <div className="space-y-4">
+              {evaluations?.items.map((evaluation) => (
+                <div key={evaluation.id} style={{ borderBottom: '1px solid #f5f5f5', paddingBottom: 12 }}>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-medium" style={{ color: '#333' }}>
+                      {evaluation.buyer_username ?? `用户 ${evaluation.buyer_id}`}
+                    </span>
+                    <Rate disabled value={evaluation.rating} style={{ fontSize: 12 }} />
+                    <span className="text-xs" style={{ color: '#999' }}>
+                      {evaluation.created_at}
+                    </span>
+                  </div>
+                  <div className="text-sm mt-2" style={{ color: '#555' }}>
+                    {evaluation.content}
+                  </div>
+                  {evaluation.images.length > 0 && (
+                    <div className="mt-2 flex gap-2">
+                      {evaluation.images.map((url, index) => (
+                        <img
+                          key={`${url}-${index}`}
+                          src={url}
+                          alt="晒图"
+                          className="rounded"
+                          style={{ width: 64, height: 64, objectFit: 'cover' }}
+                        />
+                      ))}
+                    </div>
+                  )}
+                  {evaluation.seller_reply && (
+                    <div className="text-xs mt-2 rounded px-3 py-2" style={{ background: '#fafafa', color: '#888' }}>
+                      卖家回复：{evaluation.seller_reply}
+                    </div>
+                  )}
+                  {evaluation.append_content && (
+                    <div className="text-sm mt-2" style={{ color: '#777' }}>
+                      追评：{evaluation.append_content}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
+        </Spin>
+        {evaluations && evaluations.summary.total > 5 && (
+          <div className="flex justify-center mt-4">
+            <Pagination
+              current={evalPage}
+              pageSize={5}
+              total={evaluations.summary.total}
+              onChange={setEvalPage}
+              showSizeChanger={false}
+              size="small"
+            />
+          </div>
+        )}
+      </section>
+    </>
   )
 }

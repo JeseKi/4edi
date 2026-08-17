@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
-import { App, Button, Empty, Modal, Spin, Steps, Timeline } from 'antd'
+import { App, Button, Empty, Input, Modal, Radio, Spin, Steps, Timeline } from 'antd'
 import {
   cancelMallOrder,
   confirmMallOrder,
   createMallPayment,
+  createMallRefund,
   getMallOrder,
   getMallOrderTraces,
   mockPayMallOrder,
 } from '../../lib/mall'
 import { resolveApiErrorMessage } from '../../lib/error'
 import { formatFen, MALL_ORDER_STATUS_LABELS } from '../../lib/mallFormat'
-import type { MallOrder } from '../../lib/types'
+import type { MallOrder, MallRefundType } from '../../lib/types'
 
 const STATUS_COLORS: Record<string, string> = {
   pending_payment: '#FA8C16',
@@ -19,6 +20,8 @@ const STATUS_COLORS: Record<string, string> = {
   shipped: '#722ED1',
   completed: '#52C41A',
   cancelled: '#999',
+  refunding: '#FA8C16',
+  refunded: '#999',
 }
 
 export default function OrderDetailPage() {
@@ -33,6 +36,11 @@ export default function OrderDetailPage() {
   const [payInfo, setPayInfo] = useState<{ out_trade_no: string; code_url: string | null; mode: string } | null>(null)
   const [tracesOpen, setTracesOpen] = useState(false)
   const [traces, setTraces] = useState<string[]>([])
+  const [refundModalOpen, setRefundModalOpen] = useState(false)
+  const [refundType, setRefundType] = useState<MallRefundType>('refund_only')
+  const [refundReason, setRefundReason] = useState('')
+  const [refundDescription, setRefundDescription] = useState('')
+  const [refunding, setRefunding] = useState(false)
 
   const load = useCallback(async () => {
     if (!orderNo) return
@@ -116,6 +124,38 @@ export default function OrderDetailPage() {
     }
   }
 
+  const openRefundModal = () => {
+    if (!order) return
+    setRefundType(order.status === 'paid' ? 'refund_only' : 'return_refund')
+    setRefundReason('')
+    setRefundDescription('')
+    setRefundModalOpen(true)
+  }
+
+  const handleApplyRefund = async () => {
+    if (!order) return
+    if (!refundReason.trim()) {
+      message.warning('请填写退款原因')
+      return
+    }
+    setRefunding(true)
+    try {
+      await createMallRefund({
+        order_no: order.order_no,
+        type: refundType,
+        reason: refundReason.trim(),
+        description: refundDescription.trim() || undefined,
+      })
+      message.success('退款申请已提交，等待卖家处理')
+      setRefundModalOpen(false)
+      navigate('/mall/refunds')
+    } catch (err) {
+      message.error(resolveApiErrorMessage(err, '申请失败'))
+    } finally {
+      setRefunding(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex justify-center py-24">
@@ -158,21 +198,48 @@ export default function OrderDetailPage() {
             {order.status === 'shipped' && (
               <>
                 <Button onClick={showTraces}>查看物流</Button>
+                <Button onClick={openRefundModal}>申请退款</Button>
                 <Button type="primary" onClick={handleConfirm} loading={acting} style={{ background: '#F31947' }}>
                   确认收货
                 </Button>
               </>
             )}
             {order.status === 'paid' && (
-              <Button
-                onClick={() =>
-                  navigate(`/mall/chat?shop_id=${order.shop_id}&order_no=${order.order_no}`)
-                }
-              >
-                联系卖家催发货
-              </Button>
+              <>
+                <Button onClick={openRefundModal}>申请退款</Button>
+                <Button
+                  onClick={() =>
+                    navigate(`/mall/chat?shop_id=${order.shop_id}&order_no=${order.order_no}`)
+                  }
+                >
+                  联系卖家催发货
+                </Button>
+              </>
             )}
-            {(order.status === 'completed' || order.status === 'cancelled') && (
+            {order.status === 'completed' && (
+              <>
+                <Button onClick={showTraces}>查看物流</Button>
+                <Button onClick={openRefundModal}>申请退款</Button>
+                <Button
+                  type="primary"
+                  style={{ background: '#F31947' }}
+                  onClick={() => navigate(`/mall/evaluations?order_no=${order.order_no}`)}
+                >
+                  去评价
+                </Button>
+              </>
+            )}
+            {order.status === 'refunding' && (
+              <>
+                <Button onClick={showTraces}>查看物流</Button>
+                <Link to="/mall/refunds">
+                  <Button type="primary" style={{ background: '#F31947' }}>
+                    查看退款进度
+                  </Button>
+                </Link>
+              </>
+            )}
+            {order.status === 'cancelled' && (
               <Button onClick={showTraces}>查看物流</Button>
             )}
           </div>
@@ -331,6 +398,52 @@ export default function OrderDetailPage() {
             children: <span className="text-sm">{trace}</span>,
           }))}
         />
+      </Modal>
+
+      <Modal
+        title="申请退款"
+        open={refundModalOpen}
+        onCancel={() => setRefundModalOpen(false)}
+        onOk={handleApplyRefund}
+        confirmLoading={refunding}
+        okText="提交申请"
+        cancelText="取消"
+        width={440}
+      >
+        <div className="mt-2 space-y-3">
+          <div className="text-sm" style={{ color: '#666' }}>
+            退款金额：<b style={{ color: '#F31947' }}>¥{order ? formatFen(order.pay_amount_fen) : ''}</b>
+            <span className="text-xs ml-2" style={{ color: '#999' }}>
+              提交后订单将进入退款流程，需卖家处理
+            </span>
+          </div>
+          <div>
+            <div className="text-sm mb-1" style={{ color: '#555' }}>
+              退款类型
+            </div>
+            <Radio.Group
+              value={refundType}
+              onChange={(e) => setRefundType(e.target.value)}
+              options={[
+                { label: '仅退款（未发货）', value: 'refund_only', disabled: order?.status !== 'paid' },
+                { label: '退货退款（已发货）', value: 'return_refund', disabled: order?.status === 'paid' },
+              ]}
+            />
+          </div>
+          <Input
+            placeholder="退款原因（必填）"
+            maxLength={200}
+            value={refundReason}
+            onChange={(e) => setRefundReason(e.target.value)}
+          />
+          <Input.TextArea
+            placeholder="补充说明（选填）"
+            maxLength={1000}
+            rows={3}
+            value={refundDescription}
+            onChange={(e) => setRefundDescription(e.target.value)}
+          />
+        </div>
       </Modal>
     </div>
   )

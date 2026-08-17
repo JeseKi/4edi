@@ -115,11 +115,18 @@ def _mall_routers() -> tuple[APIRouter, ...]:
 
 def _mall_tasks() -> tuple[TaskDefinition, ...]:
     from src.server.mall.service import (
+        MALL_COUPON_EXPIRE,
         MALL_ORDER_AUTO_CONFIRM,
         MALL_ORDER_PAYMENT_TIMEOUT,
+        MALL_REFUND_AUTO_AGREE,
     )
 
-    return (MALL_ORDER_PAYMENT_TIMEOUT, MALL_ORDER_AUTO_CONFIRM)
+    return (
+        MALL_ORDER_PAYMENT_TIMEOUT,
+        MALL_ORDER_AUTO_CONFIRM,
+        MALL_REFUND_AUTO_AGREE,
+        MALL_COUPON_EXPIRE,
+    )
 
 
 def _file_tasks() -> tuple[TaskDefinition, ...]:

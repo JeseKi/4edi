@@ -1,17 +1,18 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
-import { App, Button, Checkbox, Empty, Form, Input, Modal, Spin } from 'antd'
+import { App, Button, Checkbox, Empty, Form, Input, Modal, Radio, Spin } from 'antd'
 import { PlusOutlined } from '@ant-design/icons'
 import {
   createMallAddress,
   createMallOrder,
   listMallAddresses,
   listMallCart,
+  listMyCoupons,
   previewMallOrder,
 } from '../../lib/mall'
 import { resolveApiErrorMessage } from '../../lib/error'
 import { formatFen } from '../../lib/mallFormat'
-import type { MallAddress, MallOrderPreview } from '../../lib/types'
+import type { MallAddress, MallOrderPreview, MallUserCoupon } from '../../lib/types'
 
 export default function CheckoutPage() {
   const { message } = App.useApp()
@@ -23,6 +24,8 @@ export default function CheckoutPage() {
   const [selectedAddressId, setSelectedAddressId] = useState<number | null>(null)
   const [preview, setPreview] = useState<MallOrderPreview | null>(null)
   const [cartItemIds, setCartItemIds] = useState<number[]>([])
+  const [coupons, setCoupons] = useState<MallUserCoupon[]>([])
+  const [selectedCouponId, setSelectedCouponId] = useState<number | null>(null)
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
   const [addressModalOpen, setAddressModalOpen] = useState(false)
@@ -35,8 +38,9 @@ export default function CheckoutPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const [addrList] = await Promise.all([listMallAddresses()])
+      const [addrList, couponResult] = await Promise.all([listMallAddresses(), listMyCoupons({ status: 'unused', page_size: 50 })])
       setAddresses(addrList)
+      setCoupons(couponResult.items)
       setSelectedAddressId((current) => current ?? addrList.find((a) => a.is_default)?.id ?? addrList[0]?.id ?? null)
 
       let items: { sku_id: number; quantity: number }[]
@@ -65,6 +69,27 @@ export default function CheckoutPage() {
     load()
   }, [load])
 
+  const handleSelectCoupon = async (couponId: number | null) => {
+    setSelectedCouponId(couponId)
+    let items: { sku_id: number; quantity: number }[]
+    if (directSkuId) {
+      items = [{ sku_id: Number(directSkuId), quantity: directQuantity }]
+    } else {
+      const cartItems = await listMallCart()
+      items = cartItems
+        .filter((i) => i.selected)
+        .map((i) => ({ sku_id: i.sku_id, quantity: i.quantity }))
+    }
+    if (items.length === 0) return
+    try {
+      setPreview(await previewMallOrder(items, couponId ?? undefined))
+    } catch (err) {
+      message.error(resolveApiErrorMessage(err, '优惠券不可用'))
+      setSelectedCouponId(null)
+      setPreview(await previewMallOrder(items))
+    }
+  }
+
   const submitOrder = async () => {
     if (selectedAddressId == null) {
       message.warning('请选择收货地址')
@@ -78,6 +103,7 @@ export default function CheckoutPage() {
         address_id: selectedAddressId,
         items,
         cart_item_ids: isDirectBuy ? undefined : cartItemIds,
+        coupon_id: selectedCouponId ?? undefined,
       })
       message.success('订单提交成功')
       navigate(`/mall/orders/${order.order_no}`)
@@ -212,13 +238,61 @@ export default function CheckoutPage() {
         ))}
       </section>
 
+      <section className="rounded bg-white" style={{ padding: '16px 20px' }}>
+        <h3 className="text-base font-bold mb-3" style={{ color: '#333' }}>
+          优惠券
+        </h3>
+        {coupons.length === 0 ? (
+          <div className="text-sm" style={{ color: '#999' }}>
+            暂无可用优惠券
+          </div>
+        ) : (
+          <Radio.Group
+            value={selectedCouponId}
+            onChange={(e) => handleSelectCoupon(e.target.value)}
+            className="w-full"
+          >
+            <div className="space-y-2">
+              <Radio value={null} className="w-full">
+                <span className="text-sm" style={{ color: '#555' }}>
+                  不使用优惠券
+                </span>
+              </Radio>
+              {coupons.map((coupon) => (
+                <Radio key={coupon.id} value={coupon.id} className="w-full">
+                  <span className="text-sm" style={{ color: '#333' }}>
+                    {coupon.name}
+                    <span className="ml-2" style={{ color: '#F31947' }}>
+                      {coupon.type === 'discount'
+                        ? `${coupon.discount} 折`
+                        : `减 ¥${formatFen(coupon.value_fen ?? 0)}`}
+                    </span>
+                    <span className="ml-2 text-xs" style={{ color: '#999' }}>
+                      {coupon.min_amount_fen && coupon.min_amount_fen > 0
+                        ? `满 ¥${formatFen(coupon.min_amount_fen)} 可用`
+                        : '无门槛'}
+                      {coupon.scope === 'shop' && coupon.shop_name ? ` · ${coupon.shop_name}` : ''}
+                    </span>
+                  </span>
+                </Radio>
+              ))}
+            </div>
+          </Radio.Group>
+        )}
+      </section>
+
       <section className="rounded bg-white text-right" style={{ padding: '16px 20px' }}>
         <div className="text-sm mb-1" style={{ color: '#666' }}>
           商品金额：¥{formatFen(preview.goods_amount_fen)}
         </div>
-        <div className="text-sm mb-3" style={{ color: '#666' }}>
+        <div className="text-sm mb-1" style={{ color: '#666' }}>
           运费：¥{formatFen(preview.freight_fen)}
         </div>
+        {preview.coupon_discount_fen > 0 && (
+          <div className="text-sm mb-1" style={{ color: '#F31947' }}>
+            优惠券抵扣：-¥{formatFen(preview.coupon_discount_fen)}
+          </div>
+        )}
         <div className="text-base mb-4">
           应付总额：
           <span className="text-2xl font-bold" style={{ color: '#F31947' }}>

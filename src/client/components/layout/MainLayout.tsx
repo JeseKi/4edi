@@ -29,6 +29,7 @@ import {
   ShoppingOutlined,
   ShopOutlined,
   TransactionOutlined,
+  GiftOutlined,
 } from '@ant-design/icons'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
@@ -176,6 +177,11 @@ export default function MainLayout() {
             key: 'mall-admin-withdrawals',
             icon: <TransactionOutlined />,
             label: <Link to="/mall/admin/withdrawals">提现审核</Link>,
+          },
+          {
+            key: 'mall-admin-coupons',
+            icon: <GiftOutlined />,
+            label: <Link to="/mall/admin/coupons">优惠券管理</Link>,
           },
         )
       }

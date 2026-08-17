@@ -11,6 +11,8 @@ const TABS = [
   { key: 'paid', label: '待发货' },
   { key: 'shipped', label: '待收货' },
   { key: 'completed', label: '已完成' },
+  { key: 'refunding', label: '退款中' },
+  { key: 'refunded', label: '已退款' },
   { key: 'cancelled', label: '已取消' },
 ]
 
@@ -20,6 +22,8 @@ const STATUS_TAG_COLOR: Record<string, string> = {
   shipped: 'purple',
   completed: 'green',
   cancelled: 'default',
+  refunding: 'orange',
+  refunded: 'default',
 }
 
 export default function SellerOrdersPage() {

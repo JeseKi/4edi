@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 
-from .base import PaymentProvider, PrepayResult, QueryResult
+from .base import PaymentProvider, PrepayResult, QueryResult, RefundResult
 
 
 class MockPaymentProvider(PaymentProvider):
@@ -35,3 +35,17 @@ class MockPaymentProvider(PaymentProvider):
 
     def verify_notification(self, headers: dict, body: bytes) -> dict | None:
         return None
+
+    def create_refund(
+        self,
+        *,
+        out_refund_no: str,
+        out_trade_no: str,
+        amount_fen: int,
+        total_fen: int,
+        description: str,
+    ) -> RefundResult:
+        del out_trade_no, amount_fen, total_fen, description
+        return RefundResult(
+            success=True, refund_id=f"mock-refund-{out_refund_no}"
+        )

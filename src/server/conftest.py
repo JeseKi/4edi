@@ -174,8 +174,10 @@ def test_client(test_db_session: Session) -> Iterator[SyncASGITestClient]:
     from src.server.files.service import DELETE_FILE_OBJECT, EXPIRE_PENDING_FILE
     from src.server.mail import MailDeliveryExecutor
     from src.server.mall.service import (
+        MALL_COUPON_EXPIRE,
         MALL_ORDER_AUTO_CONFIRM,
         MALL_ORDER_PAYMENT_TIMEOUT,
+        MALL_REFUND_AUTO_AGREE,
     )
     from src.server.platform.runtime import ApplicationRuntime
     from src.server.config import global_config
@@ -210,6 +212,8 @@ def test_client(test_db_session: Session) -> Iterator[SyncASGITestClient]:
             DELETE_FILE_OBJECT,
             MALL_ORDER_PAYMENT_TIMEOUT,
             MALL_ORDER_AUTO_CONFIRM,
+            MALL_REFUND_AUTO_AGREE,
+            MALL_COUPON_EXPIRE,
         ),
         session_runner=run_test_task_db,
     )

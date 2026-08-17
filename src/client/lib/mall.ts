@@ -1,10 +1,17 @@
 import api from './api'
 import type {
+  GoodsEvaluationList,
   MallAddress,
   MallCartItem,
   MallCategory,
   MallChatConversation,
   MallChatMessage,
+  MallCouponScope,
+  MallCouponTemplate,
+  MallEvaluation,
+  MallFavorite,
+  MallFavoriteTargetType,
+  MallFootprint,
   MallGoods,
   MallGoodsDetail,
   MallOrder,
@@ -12,7 +19,12 @@ import type {
   MallOrderStatus,
   MallPage,
   MallPaymentPrepay,
+  MallRefund,
+  MallRefundType,
   MallShopPublic,
+  MallUserCoupon,
+  MallUserCouponStatus,
+  PendingEvaluation,
 } from './types'
 
 // ---------------------------------------------------------------------------
@@ -100,14 +112,18 @@ export interface MallOrderItemIn {
   quantity: number
 }
 
-export const previewMallOrder = async (items: MallOrderItemIn[]): Promise<MallOrderPreview> =>
-  (await api.post<MallOrderPreview>('/mall/orders/preview', { items })).data
+export const previewMallOrder = async (
+  items: MallOrderItemIn[],
+  couponId?: number,
+): Promise<MallOrderPreview> =>
+  (await api.post<MallOrderPreview>('/mall/orders/preview', { items, coupon_id: couponId })).data
 
 export const createMallOrder = async (payload: {
   address_id: number
   items: MallOrderItemIn[]
   cart_item_ids?: number[]
   remark?: string
+  coupon_id?: number
 }): Promise<MallOrder> => (await api.post<MallOrder>('/mall/orders', payload)).data
 
 export const listMallOrders = async (
@@ -139,6 +155,135 @@ export const createMallPayment = async (
 
 export const mockPayMallOrder = async (outTradeNo: string): Promise<{ status: string }> =>
   (await api.post<{ status: string }>(`/mall/payments/${outTradeNo}/mock-pay`)).data
+
+// ---------------------------------------------------------------------------
+// 退款 / 售后
+// ---------------------------------------------------------------------------
+
+export const createMallRefund = async (payload: {
+  order_no: string
+  type: MallRefundType
+  reason: string
+  description?: string
+  evidence_images?: string[]
+}): Promise<MallRefund> => (await api.post<MallRefund>('/mall/refunds', payload)).data
+
+export const listMyMallRefunds = async (params: {
+  page?: number
+  page_size?: number
+} = {}): Promise<MallPage<MallRefund>> =>
+  (await api.get<MallPage<MallRefund>>('/mall/refunds', { params })).data
+
+export const getMallRefund = async (refundNo: string): Promise<MallRefund> =>
+  (await api.get<MallRefund>(`/mall/refunds/${refundNo}`)).data
+
+export const cancelMallRefund = async (refundNo: string): Promise<MallRefund> =>
+  (await api.post<MallRefund>(`/mall/refunds/${refundNo}/cancel`)).data
+
+export const submitMallRefundReturnTracking = async (
+  refundNo: string,
+  payload: { return_tracking_company: string; return_tracking_no: string },
+): Promise<MallRefund> =>
+  (await api.post<MallRefund>(`/mall/refunds/${refundNo}/return-tracking`, payload)).data
+
+// ---------------------------------------------------------------------------
+// 商品评价 / 晒单
+// ---------------------------------------------------------------------------
+
+export const createMallEvaluation = async (
+  orderNo: string,
+  payload: { order_item_id: number; rating: number; content: string; images?: string[] },
+): Promise<MallEvaluation> =>
+  (await api.post<MallEvaluation>(`/mall/orders/${orderNo}/evaluations`, payload)).data
+
+export const listPendingEvaluations = async (): Promise<PendingEvaluation[]> =>
+  (await api.get<PendingEvaluation[]>('/mall/evaluations/pending')).data
+
+export const listMyEvaluations = async (params: {
+  page?: number
+  page_size?: number
+} = {}): Promise<MallPage<MallEvaluation>> =>
+  (await api.get<MallPage<MallEvaluation>>('/mall/evaluations/mine', { params })).data
+
+export const appendMallEvaluation = async (
+  evaluationId: number,
+  payload: { content: string; images?: string[] },
+): Promise<MallEvaluation> =>
+  (await api.post<MallEvaluation>(`/mall/evaluations/${evaluationId}/append`, payload)).data
+
+export const listGoodsEvaluations = async (
+  goodsId: number,
+  params: { page?: number; page_size?: number } = {},
+): Promise<GoodsEvaluationList> =>
+  (await api.get<GoodsEvaluationList>(`/mall/goods/${goodsId}/evaluations`, { params })).data
+
+// ---------------------------------------------------------------------------
+// 优惠券
+// ---------------------------------------------------------------------------
+
+export const listAvailableCoupons = async (params: {
+  scope?: MallCouponScope
+  shop_id?: number
+  page?: number
+  page_size?: number
+} = {}): Promise<MallPage<MallCouponTemplate>> =>
+  (await api.get<MallPage<MallCouponTemplate>>('/mall/coupons', { params })).data
+
+export const receiveCoupon = async (couponId: number): Promise<MallUserCoupon> =>
+  (await api.post<MallUserCoupon>(`/mall/coupons/${couponId}/receive`)).data
+
+export const listMyCoupons = async (params: {
+  status?: MallUserCouponStatus
+  page?: number
+  page_size?: number
+} = {}): Promise<MallPage<MallUserCoupon>> =>
+  (await api.get<MallPage<MallUserCoupon>>('/mall/coupons/mine', { params })).data
+
+// ---------------------------------------------------------------------------
+// 收藏 / 浏览足迹
+// ---------------------------------------------------------------------------
+
+export const addMallFavorite = async (payload: {
+  target_type: MallFavoriteTargetType
+  target_id: number
+}): Promise<MallFavorite> =>
+  (await api.post<MallFavorite>('/mall/favorites', payload)).data
+
+export const removeMallFavorite = async (
+  targetType: MallFavoriteTargetType,
+  targetId: number,
+): Promise<{ ok: boolean }> =>
+  (
+    await api.delete<{ ok: boolean }>('/mall/favorites', {
+      params: { target_type: targetType, target_id: targetId },
+    })
+  ).data
+
+export const listMyFavorites = async (params: {
+  target_type?: MallFavoriteTargetType
+  page?: number
+  page_size?: number
+} = {}): Promise<MallPage<MallFavorite>> =>
+  (await api.get<MallPage<MallFavorite>>('/mall/favorites', { params })).data
+
+export const getMallFavoriteStatus = async (
+  targetType: MallFavoriteTargetType,
+  targetId: number,
+): Promise<{ favorited: boolean }> =>
+  (
+    await api.get<{ favorited: boolean }>('/mall/favorites/status', {
+      params: { target_type: targetType, target_id: targetId },
+    })
+  ).data
+
+export const recordMallFootprint = async (goodsId: number): Promise<{ ok: boolean }> =>
+  (await api.post<{ ok: boolean }>('/mall/footprints', null, { params: { goods_id: goodsId } })).data
+
+export const listMyFootprints = async (params: {
+  page?: number
+  page_size?: number
+} = {}): Promise<MallPage<MallFootprint>> =>
+  (await api.get<MallPage<MallFootprint>>('/mall/footprints', { params })).data
 
 // ---------------------------------------------------------------------------
 // 客服

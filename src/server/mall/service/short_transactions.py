@@ -11,6 +11,7 @@ import secrets
 from datetime import datetime, timedelta, timezone
 
 from fastapi import HTTPException, status
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from src.server.auth.dependencies.current_user import AuthenticatedPrincipal
@@ -23,13 +24,19 @@ from ..dao import (
     CartItemDAO,
     CategoryDAO,
     ChatMessageDAO,
+    CouponTemplateDAO,
+    EvaluationDAO,
+    FavoriteDAO,
+    FootprintDAO,
     GoodsDAO,
     GoodsSkuDAO,
     OrderDAO,
     OrderItemDAO,
     OrderLogDAO,
     PaymentDAO,
+    RefundDAO,
     ShopDAO,
+    UserCouponDAO,
     WalletDAO,
     WalletLedgerDAO,
     WithdrawRequestDAO,
@@ -40,6 +47,14 @@ from ..models import (
     Category,
     ChatMessage,
     ChatSenderType,
+    CouponScope,
+    CouponStatus,
+    CouponTemplate,
+    CouponType,
+    Evaluation,
+    Favorite,
+    FavoriteTargetType,
+    Footprint,
     Goods,
     GoodsSku,
     GoodsStatus,
@@ -49,8 +64,13 @@ from ..models import (
     OrderStatus,
     Payment,
     PaymentStatus,
+    Refund,
+    RefundStatus,
+    RefundType,
     Shop,
     ShopStatus,
+    UserCoupon,
+    UserCouponStatus,
     Wallet,
     WithdrawRequest,
     WithdrawStatus,
@@ -58,6 +78,7 @@ from ..models import (
 from .long_tasks import (
     MALL_ORDER_AUTO_CONFIRM,
     MALL_ORDER_PAYMENT_TIMEOUT,
+    MALL_REFUND_AUTO_AGREE,
 )
 
 ADMIN_ROLES = frozenset({UserRole.ADMIN.value, UserRole.SUPER_ADMIN.value})
@@ -556,17 +577,23 @@ def _restore_stock(db: Session, order_items: list[dict]) -> None:
             goods.stock += item["quantity"]
 
 
-def preview_order(db: Session, user_id: int, items: list[dict]) -> dict:
-    del user_id  # 预览不依赖买家
+def preview_order(
+    db: Session, user_id: int, items: list[dict], *, coupon_id: int | None = None
+) -> dict:
     shop_id, order_items = _validate_order_items(db, items)
-    del shop_id
     goods_amount = sum(item["subtotal_fen"] for item in order_items)
     freight = mall_config.freight_fen
+    coupon_discount = 0
+    if coupon_id is not None:
+        coupon_discount = _validate_user_coupon(
+            db, user_id, coupon_id, shop_id, goods_amount
+        )
     return {
         "items": order_items,
         "goods_amount_fen": goods_amount,
         "freight_fen": freight,
-        "pay_amount_fen": goods_amount + freight,
+        "coupon_discount_fen": coupon_discount,
+        "pay_amount_fen": max(goods_amount + freight - coupon_discount, 0),
     }
 
 
@@ -579,12 +606,18 @@ def create_order(
     items: list[dict],
     cart_item_ids: list[int],
     remark: str | None,
+    coupon_id: int | None = None,
 ) -> Order:
     address = get_address_for_user(db, user_id, address_id)
     shop_id, order_items = _validate_order_items(db, items)
     goods_amount = sum(item["subtotal_fen"] for item in order_items)
     freight = mall_config.freight_fen
-    pay_amount = goods_amount + freight
+    coupon_discount = 0
+    if coupon_id is not None:
+        coupon_discount = _validate_user_coupon(
+            db, user_id, coupon_id, shop_id, goods_amount
+        )
+    pay_amount = max(goods_amount + freight - coupon_discount, 0)
 
     order = OrderDAO(db).create(
         order_no=_gen_business_no("M"),
@@ -598,6 +631,10 @@ def create_order(
         receiver_address=f"{address.province}{address.city}{address.district}{address.detail}",
         remark=remark,
     )
+    if coupon_id is not None:
+        order.coupon_id = coupon_id
+        order.coupon_discount_fen = coupon_discount
+        _mark_coupon_used(db, user_id, coupon_id, order.order_no)
     item_dao = OrderItemDAO(db)
     for item in order_items:
         item_dao.create_many(
@@ -737,6 +774,8 @@ def order_detail_payload(db: Session, order: Order) -> dict:
         "status": order.status,
         "goods_amount_fen": order.goods_amount_fen,
         "freight_fen": order.freight_fen,
+        "coupon_id": order.coupon_id,
+        "coupon_discount_fen": order.coupon_discount_fen,
         "pay_amount_fen": order.pay_amount_fen,
         "receiver_name": order.receiver_name,
         "receiver_phone": order.receiver_phone,
@@ -752,6 +791,7 @@ def order_detail_payload(db: Session, order: Order) -> dict:
         "completed_at": order.completed_at,
         "cancelled_at": order.cancelled_at,
         "cancel_reason": order.cancel_reason,
+        "refunded_at": order.refunded_at,
         "created_at": order.created_at,
         "shop_name": shop.name if shop else None,
         "items": [
@@ -1077,6 +1117,1105 @@ def admin_handle_withdraw(
             available_at=_utcnow(),
         )
     return request
+
+
+# ---------------------------------------------------------------------------
+# 退款 / 售后
+# ---------------------------------------------------------------------------
+
+
+def _get_shop_refund(
+    db: Session, principal: AuthenticatedPrincipal, refund_no: str, *, shop_id: int | None
+) -> Refund:
+    shop = resolve_seller_shop(db, principal, shop_id)
+    refund = RefundDAO(db).get_for_shop(refund_no, shop.id)
+    if refund is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="退款申请不存在")
+    return refund
+
+
+def apply_refund(
+    db: Session,
+    runtime: TaskRuntime,
+    user_id: int,
+    *,
+    order_no: str,
+    type: str,
+    reason: str,
+    description: str | None,
+    evidence_images: list[str] | None,
+) -> Refund:
+    """买家申请退款：仅退款（未发货）或退货退款（已发货/已收货）。"""
+    order = _get_order_for_buyer(db, user_id, order_no)
+    if order.status not in (OrderStatus.PAID, OrderStatus.SHIPPED, OrderStatus.COMPLETED):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前订单状态不可申请退款")
+    refund_type = RefundType(type)
+    if refund_type == RefundType.REFUND_ONLY and order.status != OrderStatus.PAID:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅未发货订单可申请仅退款")
+    if refund_type == RefundType.RETURN_REFUND and order.status not in (
+        OrderStatus.SHIPPED,
+        OrderStatus.COMPLETED,
+    ):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前订单状态不支持退货退款")
+    refund_dao = RefundDAO(db)
+    if refund_dao.find_active_by_order(order.order_no) is not None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="该订单已有进行中的退款申请")
+    refund = refund_dao.create(
+        refund_no=_gen_business_no("R"),
+        order_no=order.order_no,
+        shop_id=order.shop_id,
+        buyer_id=user_id,
+        type=refund_type,
+        status=RefundStatus.PENDING,
+        order_status_snapshot=order.status,
+        reason=reason,
+        description=description,
+        evidence_images=evidence_images or [],
+        amount_fen=order.pay_amount_fen,
+    )
+    order.status = OrderStatus.REFUNDING
+    OrderLogDAO(db).append(order.id, f"买家发起退款申请（{'仅退款' if refund_type == RefundType.REFUND_ONLY else '退货退款'}）：{reason}")
+    runtime.enqueue(
+        db,
+        MALL_REFUND_AUTO_AGREE,
+        refund.refund_no,
+        reference=TaskReference(resource_type="mall_refund", resource_id=refund.refund_no),
+        not_before=_utcnow() + timedelta(hours=mall_config.refund_auto_agree_hours),
+    )
+    return refund
+
+
+def _restore_order_status(db: Session, order: Order, refund: Refund, message: str) -> None:
+    """退款取消/驳回后把订单恢复到申请前的状态。"""
+    order.status = refund.order_status_snapshot
+    OrderLogDAO(db).append(order.id, message)
+
+
+def cancel_refund(db: Session, user_id: int, refund_no: str) -> Refund:
+    """买家取消退款申请（仅待处理状态）。"""
+    refund = RefundDAO(db).lock_by_no(refund_no)
+    if refund is None or refund.buyer_id != user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="退款申请不存在")
+    if refund.status != RefundStatus.PENDING:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前状态不可取消")
+    order = OrderDAO(db).lock_by_no(refund.order_no)
+    if order is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="订单不存在")
+    refund.status = RefundStatus.CANCELLED
+    refund.refuse_reason = "买家取消退款申请"
+    _restore_order_status(db, order, refund, "买家取消退款申请，订单状态已恢复")
+    return refund
+
+
+def submit_return_tracking(
+    db: Session, user_id: int, refund_no: str, *, company: str, tracking_no: str
+) -> Refund:
+    """退货退款：买家填写退货物流单号。"""
+    refund = RefundDAO(db).lock_by_no(refund_no)
+    if refund is None or refund.buyer_id != user_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="退款申请不存在")
+    if refund.status != RefundStatus.RETURNING:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前状态不可填写退货物流")
+    refund.return_tracking_company = company
+    refund.return_tracking_no = tracking_no
+    refund.return_shipped_at = _utcnow()
+    order = OrderDAO(db).get_by_no(refund.order_no)
+    if order is not None:
+        OrderLogDAO(db).append(order.id, f"买家已寄回退货：{company} {tracking_no}")
+    return refund
+
+
+def _initiate_refund(db: Session, refund: Refund, handler_user_id: int | None) -> None:
+    """发起通道退款：mock 通道同步成功；真实通道进入退款中等待回调。"""
+    order = OrderDAO(db).lock_by_no(refund.order_no)
+    if order is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="订单不存在")
+    refund.decided_at = _utcnow()
+    refund.handler_user_id = handler_user_id
+    from ..payment import get_payment_provider
+
+    provider = get_payment_provider()
+    payment = PaymentDAO(db).get_by_order_no(order.order_no)
+    if payment is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="订单无支付记录，无法退款")
+    refund.channel = provider.key
+    try:
+        result = provider.create_refund(
+            out_refund_no=refund.refund_no,
+            out_trade_no=payment.out_trade_no,
+            amount_fen=refund.amount_fen,
+            total_fen=order.pay_amount_fen,
+            description=refund.reason,
+        )
+    except Exception as exc:
+        logger.error("退款通道调用失败（{}）：{}", refund.refund_no, exc)
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=f"退款申请失败：{exc}"
+        )
+    if not result.success:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY, detail=result.message or "退款申请失败"
+        )
+    refund.channel_refund_id = result.refund_id
+    refund.status = RefundStatus.REFUNDING
+    OrderLogDAO(db).append(order.id, "退款申请已提交支付通道，等待退款到账")
+    if provider.is_mock:
+        _complete_refund_success(
+            db, refund, channel_refund_id=result.refund_id, note="模拟通道退款成功"
+        )
+
+
+def _complete_refund_success(
+    db: Session, refund: Refund, *, channel_refund_id: str | None = None, note: str = "退款成功"
+) -> None:
+    """退款成功入账：扣回店铺钱包、回补库存与销量、订单置为已退款；幂等。"""
+    if refund.status == RefundStatus.SUCCESS:
+        return
+    if refund.status != RefundStatus.REFUNDING:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前退款状态不可完成")
+    order = OrderDAO(db).lock_by_no(refund.order_no)
+    if order is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="订单不存在")
+    if channel_refund_id:
+        refund.channel_refund_id = channel_refund_id
+    refund.status = RefundStatus.SUCCESS
+    refund.success_at = _utcnow()
+    # 已确认收货的货款在可用余额，否则仍在冻结货款中
+    wallet = WalletDAO(db).get_or_create(order.shop_id)
+    if refund.order_status_snapshot == OrderStatus.COMPLETED:
+        wallet.available_fen = max(wallet.available_fen - refund.amount_fen, 0)
+        ledger_status = LedgerStatus.AVAILABLE
+        ledger_note = "订单退款，从可用余额扣回"
+    else:
+        wallet.frozen_fen = max(wallet.frozen_fen - refund.amount_fen, 0)
+        ledger_status = LedgerStatus.FROZEN
+        ledger_note = "订单退款，冻结货款扣回"
+    WalletLedgerDAO(db).create(
+        shop_id=order.shop_id,
+        entry_type=LedgerType.SALE,
+        status=ledger_status,
+        amount_fen=-refund.amount_fen,
+        related_no=order.order_no,
+        note=ledger_note,
+    )
+    items = OrderItemDAO(db).list_by_order(order.id)
+    item_snapshots = [
+        {"sku_id": item.sku_id, "goods_id": item.goods_id, "quantity": item.quantity}
+        for item in items
+    ]
+    _restore_stock(db, item_snapshots)
+    for item in items:
+        goods = GoodsDAO(db).lock(item.goods_id)
+        if goods is not None:
+            goods.sales = max(goods.sales - item.quantity, 0)
+    order.status = OrderStatus.REFUNDED
+    order.refunded_at = _utcnow()
+    OrderLogDAO(db).append(order.id, f"{note}，货款已退回买家")
+
+
+def seller_agree_refund(
+    db: Session, principal: AuthenticatedPrincipal, refund_no: str, *, shop_id: int | None = None
+) -> Refund:
+    """卖家同意退款：仅退款直接发起通道退款；退货退款进入等待买家寄回。"""
+    refund = _get_shop_refund(db, principal, refund_no, shop_id=shop_id)
+    if refund.status != RefundStatus.PENDING:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="退款申请已处理")
+    if refund.type == RefundType.RETURN_REFUND:
+        refund.decided_at = _utcnow()
+        refund.handler_user_id = principal.user_id
+        refund.status = RefundStatus.RETURNING
+        order = OrderDAO(db).get_by_no(refund.order_no)
+        if order is not None:
+            OrderLogDAO(db).append(order.id, "卖家同意退货，等待买家寄回")
+        return refund
+    _initiate_refund(db, refund, principal.user_id)
+    return refund
+
+
+def seller_reject_refund(
+    db: Session,
+    principal: AuthenticatedPrincipal,
+    refund_no: str,
+    *,
+    reason: str,
+    shop_id: int | None = None,
+) -> Refund:
+    refund = _get_shop_refund(db, principal, refund_no, shop_id=shop_id)
+    if refund.status != RefundStatus.PENDING:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="退款申请已处理")
+    refund.status = RefundStatus.REJECTED
+    refund.refuse_reason = reason or "卖家拒绝退款"
+    refund.decided_at = _utcnow()
+    refund.handler_user_id = principal.user_id
+    order = OrderDAO(db).lock_by_no(refund.order_no)
+    if order is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="订单不存在")
+    _restore_order_status(db, order, refund, f"卖家拒绝退款：{refund.refuse_reason}")
+    return refund
+
+
+def seller_confirm_return(
+    db: Session, principal: AuthenticatedPrincipal, refund_no: str, *, shop_id: int | None = None
+) -> Refund:
+    """卖家确认收到退货后发起退款。"""
+    refund = _get_shop_refund(db, principal, refund_no, shop_id=shop_id)
+    if refund.status != RefundStatus.RETURNING:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前状态不可确认收货")
+    if not refund.return_tracking_no:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="买家尚未填写退货物流")
+    refund.return_received_at = _utcnow()
+    _initiate_refund(db, refund, principal.user_id)
+    return refund
+
+
+def auto_agree_refund(db: Session, refund_no: str) -> None:
+    """退款超时自动同意任务调用；幂等，仅处理超时的待处理退款。"""
+    refund = RefundDAO(db).lock_by_no(refund_no)
+    if refund is None or refund.status != RefundStatus.PENDING:
+        return
+    deadline = refund.created_at + timedelta(hours=mall_config.refund_auto_agree_hours)
+    if _utcnow() < _as_utc(deadline):
+        return
+    _agree_refund(db, refund, None)
+
+
+def _agree_refund(db: Session, refund: Refund, handler_user_id: int | None) -> None:
+    """同意退款的公共入口（卖家/管理员/超时任务共用）。"""
+    if refund.status != RefundStatus.PENDING:
+        return
+    if refund.type == RefundType.RETURN_REFUND:
+        refund.decided_at = _utcnow()
+        refund.handler_user_id = handler_user_id
+        refund.status = RefundStatus.RETURNING
+        order = OrderDAO(db).get_by_no(refund.order_no)
+        if order is not None:
+            OrderLogDAO(db).append(order.id, "卖家同意退货，等待买家寄回")
+        return
+    _initiate_refund(db, refund, handler_user_id)
+
+
+def handle_refund_notification(
+    db: Session, *, out_refund_no: str, refund_status: str, channel_refund_id: str | None = None
+) -> Refund:
+    """微信退款回调入口；退款成功幂等入账。"""
+    refund = RefundDAO(db).lock_by_no(out_refund_no)
+    if refund is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="退款单不存在")
+    if refund_status == "SUCCESS":
+        _complete_refund_success(
+            db, refund, channel_refund_id=channel_refund_id, note="微信退款成功"
+        )
+    return refund
+
+
+def refund_detail_payload(db: Session, refund: Refund) -> dict:
+    order = OrderDAO(db).get_by_no(refund.order_no)
+    shop = ShopDAO(db).get(refund.shop_id)
+    return {
+        "id": refund.id,
+        "refund_no": refund.refund_no,
+        "order_no": refund.order_no,
+        "shop_id": refund.shop_id,
+        "shop_name": shop.name if shop else None,
+        "buyer_id": refund.buyer_id,
+        "type": refund.type,
+        "status": refund.status,
+        "order_status_snapshot": refund.order_status_snapshot,
+        "reason": refund.reason,
+        "description": refund.description,
+        "evidence_images": refund.evidence_images,
+        "amount_fen": refund.amount_fen,
+        "return_tracking_company": refund.return_tracking_company,
+        "return_tracking_no": refund.return_tracking_no,
+        "return_shipped_at": refund.return_shipped_at,
+        "return_received_at": refund.return_received_at,
+        "channel": refund.channel,
+        "channel_refund_id": refund.channel_refund_id,
+        "refuse_reason": refund.refuse_reason,
+        "decided_at": refund.decided_at,
+        "success_at": refund.success_at,
+        "created_at": refund.created_at,
+        "order": order_detail_payload(db, order) if order is not None else None,
+    }
+
+
+def refund_list_payloads(db: Session, refunds: list[Refund]) -> list[dict]:
+    return [refund_detail_payload(db, refund) for refund in refunds]
+
+
+def list_my_refunds(
+    db: Session, user_id: int, page: int, page_size: int
+) -> tuple[list[Refund], int]:
+    return RefundDAO(db).list_for_buyer(user_id, page, page_size)
+
+
+def get_my_refund(db: Session, user_id: int, refund_no: str) -> Refund:
+    refund = RefundDAO(db).get_for_buyer(refund_no, user_id)
+    if refund is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="退款申请不存在")
+    return refund
+
+
+def seller_list_refunds(
+    db: Session,
+    principal: AuthenticatedPrincipal,
+    *,
+    status_filter: RefundStatus | None,
+    page: int,
+    page_size: int,
+    shop_id: int | None = None,
+) -> tuple[list[Refund], int]:
+    shop = resolve_seller_shop(db, principal, shop_id)
+    return RefundDAO(db).list_for_shop(shop.id, status_filter, page, page_size)
+
+
+def seller_get_refund(
+    db: Session, principal: AuthenticatedPrincipal, refund_no: str, *, shop_id: int | None = None
+) -> Refund:
+    return _get_shop_refund(db, principal, refund_no, shop_id=shop_id)
+
+
+def admin_list_refunds(
+    db: Session, *, status_filter: RefundStatus | None, page: int, page_size: int
+) -> tuple[list[Refund], int]:
+    return RefundDAO(db).list_all(status_filter, page, page_size)
+
+
+def admin_handle_refund(
+    db: Session,
+    refund_id: int,
+    *,
+    approved: bool,
+    reject_reason: str | None,
+    handler_user_id: int,
+) -> Refund:
+    """管理员仲裁退款：待处理可同意/驳回；退货中可确认并发起退款。"""
+    refund = RefundDAO(db).lock(refund_id)
+    if refund is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="退款申请不存在")
+    if refund.status == RefundStatus.PENDING:
+        if approved:
+            _agree_refund(db, refund, handler_user_id)
+        else:
+            refund.status = RefundStatus.REJECTED
+            refund.refuse_reason = reject_reason or "平台驳回退款申请"
+            refund.decided_at = _utcnow()
+            refund.handler_user_id = handler_user_id
+            order = OrderDAO(db).lock_by_no(refund.order_no)
+            if order is not None:
+                _restore_order_status(db, order, refund, "平台驳回退款申请，订单状态已恢复")
+        return refund
+    if refund.status == RefundStatus.RETURNING and approved:
+        _initiate_refund(db, refund, handler_user_id)
+        return refund
+    raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前状态不可处理")
+
+
+# ---------------------------------------------------------------------------
+# 商品评价 / 晒单
+# ---------------------------------------------------------------------------
+
+
+def create_evaluation(
+    db: Session,
+    user_id: int,
+    *,
+    order_no: str,
+    order_item_id: int,
+    rating: int,
+    content: str,
+    images: list[str] | None,
+) -> Evaluation:
+    """买家对已完成订单的商品发表评价（一个订单项仅可评价一次）。"""
+    order = _get_order_for_buyer(db, user_id, order_no)
+    if order.status != OrderStatus.COMPLETED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="仅确认收货后的订单可评价"
+        )
+    item = OrderItemDAO(db).get(order.id, order_item_id)
+    if item is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="订单商品不存在"
+        )
+    eval_dao = EvaluationDAO(db)
+    if eval_dao.get_by_order_item(order.id, order_item_id) is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="该商品已评价过"
+        )
+    evaluation = eval_dao.create(
+        order_id=order.id,
+        order_item_id=item.id,
+        goods_id=item.goods_id,
+        shop_id=order.shop_id,
+        buyer_id=user_id,
+        rating=rating,
+        content=content,
+        images=images or [],
+    )
+    OrderLogDAO(db).append(order.id, f"买家对商品「{item.goods_name}」发表了评价")
+    return evaluation
+
+
+def append_evaluation(
+    db: Session,
+    user_id: int,
+    evaluation_id: int,
+    *,
+    content: str,
+    images: list[str] | None,
+) -> Evaluation:
+    """买家追评（每次评价仅可追评一次）。"""
+    evaluation = EvaluationDAO(db).get_for_buyer(evaluation_id, user_id)
+    if evaluation is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="评价不存在"
+        )
+    if evaluation.appended_at is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="该评价已追评过"
+        )
+    evaluation.append_content = content
+    evaluation.append_images = images or []
+    evaluation.appended_at = _utcnow()
+    return evaluation
+
+
+def seller_reply_evaluation(
+    db: Session,
+    principal: AuthenticatedPrincipal,
+    evaluation_id: int,
+    *,
+    content: str,
+    shop_id: int | None = None,
+) -> Evaluation:
+    """卖家回复本店商品评价（可多次回复，覆盖更新）。"""
+    shop = resolve_seller_shop(db, principal, shop_id)
+    evaluation = EvaluationDAO(db).get_for_shop(evaluation_id, shop.id)
+    if evaluation is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="评价不存在"
+        )
+    evaluation.seller_reply = content
+    evaluation.seller_replied_at = _utcnow()
+    return evaluation
+
+
+def list_goods_evaluations(
+    db: Session, goods_id: int, page: int, page_size: int
+) -> tuple[list[Evaluation], dict]:
+    """商品评价列表（公开）+ 评分汇总。"""
+    dao = EvaluationDAO(db)
+    items, total = dao.list_by_goods(goods_id, page, page_size)
+    summary = dao.rating_summary(goods_id)
+    summary["total"] = total
+    return items, summary
+
+
+def list_my_evaluations(
+    db: Session, user_id: int, page: int, page_size: int
+) -> tuple[list[Evaluation], int]:
+    return EvaluationDAO(db).list_by_buyer(user_id, page, page_size)
+
+
+def list_pending_evaluations(db: Session, user_id: int) -> list[dict]:
+    """待评价列表：已完成订单中尚未评价的商品。"""
+    orders = OrderDAO(db).list_completed_for_buyer(user_id)
+    result: list[dict] = []
+    for order in orders:
+        items = OrderItemDAO(db).list_by_order(order.id)
+        evaluated_ids = {
+            e.order_item_id for e in EvaluationDAO(db).list_by_order(order.id)
+        }
+        shop = ShopDAO(db).get(order.shop_id)
+        for item in items:
+            if item.id in evaluated_ids:
+                continue
+            result.append(
+                {
+                    "order_no": order.order_no,
+                    "order_item_id": item.id,
+                    "goods_id": item.goods_id,
+                    "goods_name": item.goods_name,
+                    "goods_image": item.goods_image,
+                    "sku_specs": item.sku_specs,
+                    "shop_id": order.shop_id,
+                    "shop_name": shop.name if shop else "",
+                }
+            )
+    return result
+
+
+def seller_list_evaluations(
+    db: Session,
+    principal: AuthenticatedPrincipal,
+    *,
+    page: int,
+    page_size: int,
+    shop_id: int | None = None,
+) -> tuple[list[Evaluation], int]:
+    shop = resolve_seller_shop(db, principal, shop_id)
+    return EvaluationDAO(db).list_for_shop(shop.id, page, page_size)
+
+
+def evaluation_payload(db: Session, evaluation: Evaluation) -> dict:
+    from src.server.auth.dao import UserDAO
+
+    item = OrderItemDAO(db).get(evaluation.order_id, evaluation.order_item_id)
+    order = OrderDAO(db).get(evaluation.order_id)
+    buyer = UserDAO(db).get_by_id(evaluation.buyer_id)
+    return {
+        "id": evaluation.id,
+        "order_id": evaluation.order_id,
+        "order_no": order.order_no if order is not None else None,
+        "order_item_id": evaluation.order_item_id,
+        "goods_id": evaluation.goods_id,
+        "goods_name": item.goods_name if item is not None else None,
+        "goods_image": item.goods_image if item is not None else None,
+        "sku_specs": item.sku_specs if item is not None else {},
+        "shop_id": evaluation.shop_id,
+        "buyer_id": evaluation.buyer_id,
+        "buyer_username": buyer.username if buyer is not None else None,
+        "rating": evaluation.rating,
+        "content": evaluation.content,
+        "images": evaluation.images,
+        "seller_reply": evaluation.seller_reply,
+        "seller_replied_at": evaluation.seller_replied_at,
+        "append_content": evaluation.append_content,
+        "append_images": evaluation.append_images,
+        "appended_at": evaluation.appended_at,
+        "created_at": evaluation.created_at,
+    }
+
+
+def evaluation_list_payloads(db: Session, evaluations: list[Evaluation]) -> list[dict]:
+    return [evaluation_payload(db, evaluation) for evaluation in evaluations]
+
+
+# ---------------------------------------------------------------------------
+# 收藏/关注 + 浏览足迹
+# ---------------------------------------------------------------------------
+
+
+def _check_favorite_target(db: Session, target_type: FavoriteTargetType, target_id: int) -> None:
+    """校验收藏目标存在：商品须为在售，店铺须为已审核通过。"""
+    if target_type == FavoriteTargetType.GOODS:
+        goods = GoodsDAO(db).get(target_id)
+        if goods is None or goods.status != GoodsStatus.ON:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="商品不存在或已下架"
+            )
+    else:
+        shop = ShopDAO(db).get(target_id)
+        if shop is None or shop.status != ShopStatus.APPROVED:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="店铺不存在或未通过审核"
+            )
+
+
+def add_favorite(
+    db: Session,
+    user_id: int,
+    *,
+    target_type: FavoriteTargetType,
+    target_id: int,
+) -> Favorite:
+    """收藏商品/关注店铺（幂等：已收藏直接返回）。"""
+    _check_favorite_target(db, target_type, target_id)
+    dao = FavoriteDAO(db)
+    existing = dao.get(user_id, target_type, target_id)
+    if existing is not None:
+        return existing
+    return dao.create(user_id=user_id, target_type=target_type, target_id=target_id)
+
+
+def remove_favorite(
+    db: Session,
+    user_id: int,
+    *,
+    target_type: FavoriteTargetType,
+    target_id: int,
+) -> None:
+    """取消收藏/关注（幂等：不存在不报错）。"""
+    FavoriteDAO(db).delete(user_id, target_type, target_id)
+
+
+def is_favorited(db: Session, user_id: int, *, target_type: FavoriteTargetType, target_id: int) -> bool:
+    return FavoriteDAO(db).get(user_id, target_type, target_id) is not None
+
+
+def favorite_payload(db: Session, favorite: Favorite) -> dict:
+    """收藏记录 + 目标快照。"""
+    if favorite.target_type == FavoriteTargetType.GOODS:
+        goods = GoodsDAO(db).get(favorite.target_id)
+        if goods is None:
+            return {
+                "id": favorite.id,
+                "target_type": favorite.target_type.value,
+                "target_id": favorite.target_id,
+                "target_name": None,
+                "target_image": None,
+                "target_price_fen": None,
+                "shop_id": None,
+                "created_at": favorite.created_at,
+            }
+        return {
+            "id": favorite.id,
+            "target_type": favorite.target_type.value,
+            "target_id": favorite.target_id,
+            "target_name": goods.name,
+            "target_image": goods.main_image,
+            "target_price_fen": goods.price_fen,
+            "shop_id": goods.shop_id,
+            "created_at": favorite.created_at,
+        }
+    shop = ShopDAO(db).get(favorite.target_id)
+    if shop is None:
+        return {
+            "id": favorite.id,
+            "target_type": favorite.target_type.value,
+            "target_id": favorite.target_id,
+            "target_name": None,
+            "target_image": None,
+            "target_price_fen": None,
+            "shop_id": None,
+            "created_at": favorite.created_at,
+        }
+    return {
+        "id": favorite.id,
+        "target_type": favorite.target_type.value,
+        "target_id": favorite.target_id,
+        "target_name": shop.name,
+        "target_image": shop.avatar,
+        "target_price_fen": None,
+        "shop_id": shop.id,
+        "created_at": favorite.created_at,
+    }
+
+
+def list_my_favorites(
+    db: Session,
+    user_id: int,
+    *,
+    target_type: FavoriteTargetType | None,
+    page: int,
+    page_size: int,
+) -> tuple[list[dict], int]:
+    favorites, total = FavoriteDAO(db).list_for_user(user_id, target_type, page, page_size)
+    return [favorite_payload(db, f) for f in favorites], total
+
+
+def record_footprint(db: Session, user_id: int, *, goods_id: int) -> None:
+    """记录浏览足迹（upsert：每用户每商品保留最新一条）。"""
+    goods = GoodsDAO(db).get(goods_id)
+    if goods is None or goods.status != GoodsStatus.ON:
+        return
+    FootprintDAO(db).upsert(user_id=user_id, goods_id=goods.id, shop_id=goods.shop_id)
+
+
+def footprint_payload(db: Session, footprint: Footprint) -> dict:
+    goods = GoodsDAO(db).get(footprint.goods_id)
+    shop = ShopDAO(db).get(footprint.shop_id)
+    return {
+        "goods_id": footprint.goods_id,
+        "goods_name": goods.name if goods is not None else None,
+        "goods_image": goods.main_image if goods is not None else None,
+        "price_fen": goods.price_fen if goods is not None else None,
+        "shop_id": footprint.shop_id,
+        "shop_name": shop.name if shop is not None else None,
+        "viewed_at": footprint.viewed_at,
+    }
+
+
+def list_my_footprints(
+    db: Session, user_id: int, page: int, page_size: int
+) -> tuple[list[dict], int]:
+    footprints, total = FootprintDAO(db).list_for_user(user_id, page, page_size)
+    return [footprint_payload(db, f) for f in footprints], total
+
+
+# ---------------------------------------------------------------------------
+# 优惠券
+# ---------------------------------------------------------------------------
+
+
+def _coupon_discount_fen(coupon: CouponTemplate, goods_amount: int) -> int:
+    """按模板计算可抵扣金额（不超过商品金额）。"""
+    if coupon.type == CouponType.FIXED:
+        return min(coupon.value_fen, goods_amount)
+    discount = max(min(coupon.discount, 99), 1)
+    return round(goods_amount * (100 - discount) / 100)
+
+
+def _validate_user_coupon(
+    db: Session, user_id: int, coupon_id: int, shop_id: int, goods_amount: int
+) -> int:
+    """校验用户券可用性（锁行）并返回可抵扣金额。"""
+    user_coupon = UserCouponDAO(db).lock_for_user(user_id, coupon_id)
+    if user_coupon is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="优惠券不存在"
+        )
+    if user_coupon.status != UserCouponStatus.UNUSED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="优惠券不可用"
+        )
+    if user_coupon.expired_at is not None and _utcnow() > _as_utc(
+        user_coupon.expired_at
+    ):
+        user_coupon.status = UserCouponStatus.EXPIRED
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="优惠券已过期"
+        )
+    coupon = CouponTemplateDAO(db).get(user_coupon.coupon_id)
+    if coupon is None or coupon.status != CouponStatus.ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="优惠券已失效"
+        )
+    now = _utcnow()
+    if now < _as_utc(coupon.valid_from) or now > _as_utc(coupon.valid_until):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="优惠券不在有效期内"
+        )
+    if goods_amount < coupon.min_amount_fen:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"未满足使用门槛（满 {coupon.min_amount_fen} 分可用）",
+        )
+    if coupon.scope == CouponScope.SHOP and coupon.shop_id != shop_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="该优惠券不适用于本店商品"
+        )
+    return _coupon_discount_fen(coupon, goods_amount)
+
+
+def _mark_coupon_used(db: Session, user_id: int, coupon_id: int, order_no: str) -> None:
+    """下单时把用户券置为已使用（与创建订单同一短事务）。"""
+    user_coupon = UserCouponDAO(db).lock_for_user(user_id, coupon_id)
+    if user_coupon is None or user_coupon.status != UserCouponStatus.UNUSED:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="优惠券不可用"
+        )
+    user_coupon.status = UserCouponStatus.USED
+    user_coupon.order_no = order_no
+    user_coupon.used_at = _utcnow()
+
+
+def list_available_coupons(
+    db: Session,
+    *,
+    scope: CouponScope | None,
+    shop_id: int | None,
+    page: int,
+    page_size: int,
+) -> tuple[list[CouponTemplate], int]:
+    """领券中心：进行中的有效券。"""
+    return CouponTemplateDAO(db).list_available(
+        scope=scope, shop_id=shop_id, page=page, page_size=page_size
+    )
+
+
+def receive_coupon(db: Session, user_id: int, coupon_id: int) -> UserCoupon:
+    """领取优惠券：锁模板行防超发，校验限领次数。"""
+    coupon = CouponTemplateDAO(db).lock(coupon_id)
+    if coupon is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="优惠券不存在"
+        )
+    if coupon.status != CouponStatus.ACTIVE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="优惠券已失效"
+        )
+    now = _utcnow()
+    if now < _as_utc(coupon.valid_from) or now > _as_utc(coupon.valid_until):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="优惠券不在领取时间内"
+        )
+    if coupon.total_count > 0 and coupon.received_count >= coupon.total_count:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="优惠券已被领完"
+        )
+    dao = UserCouponDAO(db)
+    if dao.count_for_user(user_id, coupon.id) >= coupon.per_user_limit:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="已达到每人限领数量"
+        )
+    coupon.received_count += 1
+    return dao.create(
+        user_id=user_id, coupon_id=coupon.id, expired_at=coupon.valid_until
+    )
+
+
+def list_my_coupons(
+    db: Session,
+    user_id: int,
+    *,
+    status_filter: UserCouponStatus | None,
+    page: int,
+    page_size: int,
+) -> tuple[list[UserCoupon], int]:
+    """我的优惠券：查询前惰性把已过期未使用的券置为过期。"""
+    UserCouponDAO(db).mark_expired()
+    return UserCouponDAO(db).list_for_user(user_id, status_filter, page, page_size)
+
+
+def coupon_payload(db: Session, coupon: CouponTemplate) -> dict:
+    shop = ShopDAO(db).get(coupon.shop_id) if coupon.shop_id is not None else None
+    return {
+        "id": coupon.id,
+        "name": coupon.name,
+        "type": coupon.type,
+        "value_fen": coupon.value_fen,
+        "discount": coupon.discount,
+        "min_amount_fen": coupon.min_amount_fen,
+        "scope": coupon.scope,
+        "shop_id": coupon.shop_id,
+        "shop_name": shop.name if shop is not None else None,
+        "total_count": coupon.total_count,
+        "received_count": coupon.received_count,
+        "per_user_limit": coupon.per_user_limit,
+        "valid_from": coupon.valid_from,
+        "valid_until": coupon.valid_until,
+        "status": coupon.status,
+        "created_at": coupon.created_at,
+    }
+
+
+def user_coupon_payload(db: Session, user_coupon: UserCoupon) -> dict:
+    coupon = CouponTemplateDAO(db).get(user_coupon.coupon_id)
+    if coupon is not None:
+        shop = ShopDAO(db).get(coupon.shop_id) if coupon.shop_id is not None else None
+        template = {
+            "name": coupon.name,
+            "type": coupon.type,
+            "value_fen": coupon.value_fen,
+            "discount": coupon.discount,
+            "min_amount_fen": coupon.min_amount_fen,
+            "scope": coupon.scope,
+            "shop_id": coupon.shop_id,
+            "shop_name": shop.name if shop is not None else None,
+            "valid_until": coupon.valid_until,
+        }
+    else:
+        template = {}
+    return {
+        "id": user_coupon.id,
+        "user_id": user_coupon.user_id,
+        "coupon_id": user_coupon.coupon_id,
+        "status": user_coupon.status,
+        "order_no": user_coupon.order_no,
+        "received_at": user_coupon.received_at,
+        "used_at": user_coupon.used_at,
+        "expired_at": user_coupon.expired_at,
+        **template,
+    }
+
+
+def _validate_coupon_fields(payload: dict) -> None:
+    """校验券类型相关字段（创建/更新共用）。"""
+    if payload.get("valid_from") is not None and payload.get("valid_until") is not None:
+        if payload["valid_from"] >= payload["valid_until"]:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="有效期起始时间必须早于结束时间"
+            )
+    if payload.get("type") == CouponType.FIXED.value and payload.get("value_fen", 0) <= 0:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="满减券面额必须大于 0"
+        )
+    if payload.get("type") == CouponType.DISCOUNT.value:
+        discount = payload.get("discount", 100)
+        if not (1 <= discount <= 99):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="折扣必须在 1-99 之间"
+            )
+    if payload.get("total_count", 0) < 0 or payload.get("per_user_limit", 1) < 1:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="发行量/限领数量不合法"
+        )
+
+
+def seller_create_coupon(
+    db: Session, principal: AuthenticatedPrincipal, payload: dict, *, shop_id: int | None = None
+) -> CouponTemplate:
+    shop = resolve_seller_shop(db, principal, shop_id)
+    payload["scope"] = CouponScope.SHOP
+    payload["shop_id"] = shop.id
+    _validate_coupon_fields(payload)
+    return CouponTemplateDAO(db).create(
+        name=payload["name"],
+        type=CouponType(payload["type"]),
+        value_fen=payload.get("value_fen", 0),
+        discount=payload.get("discount", 100),
+        min_amount_fen=payload.get("min_amount_fen", 0),
+        scope=CouponScope.SHOP,
+        shop_id=shop.id,
+        total_count=payload.get("total_count", 0),
+        per_user_limit=payload.get("per_user_limit", 1),
+        valid_from=payload["valid_from"],
+        valid_until=payload["valid_until"],
+    )
+
+
+def _get_shop_coupon(
+    db: Session, principal: AuthenticatedPrincipal, coupon_id: int, *, shop_id: int | None
+) -> CouponTemplate:
+    shop = resolve_seller_shop(db, principal, shop_id)
+    coupon = CouponTemplateDAO(db).get_for_shop(coupon_id, shop.id)
+    if coupon is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="优惠券不存在"
+        )
+    return coupon
+
+
+def seller_update_coupon(
+    db: Session,
+    principal: AuthenticatedPrincipal,
+    coupon_id: int,
+    payload: dict,
+    *,
+    shop_id: int | None = None,
+) -> CouponTemplate:
+    coupon = _get_shop_coupon(db, principal, coupon_id, shop_id=shop_id)
+    _validate_coupon_fields(payload)
+    for field in (
+        "name",
+        "value_fen",
+        "discount",
+        "min_amount_fen",
+        "total_count",
+        "per_user_limit",
+        "valid_from",
+        "valid_until",
+    ):
+        if field in payload:
+            setattr(coupon, field, payload[field])
+    return coupon
+
+
+def seller_list_coupons(
+    db: Session,
+    principal: AuthenticatedPrincipal,
+    *,
+    page: int,
+    page_size: int,
+    shop_id: int | None = None,
+) -> tuple[list[CouponTemplate], int]:
+    shop = resolve_seller_shop(db, principal, shop_id)
+    return CouponTemplateDAO(db).list_for_shop(shop.id, page, page_size)
+
+
+def seller_set_coupon_status(
+    db: Session,
+    principal: AuthenticatedPrincipal,
+    coupon_id: int,
+    *,
+    on: bool,
+    shop_id: int | None = None,
+) -> CouponTemplate:
+    coupon = _get_shop_coupon(db, principal, coupon_id, shop_id=shop_id)
+    if on:
+        if coupon.status != CouponStatus.PAUSED:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="当前状态不可上架"
+            )
+        coupon.status = CouponStatus.ACTIVE
+    else:
+        if coupon.status != CouponStatus.ACTIVE:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="当前状态不可下架"
+            )
+        coupon.status = CouponStatus.PAUSED
+    return coupon
+
+
+def admin_create_coupon(db: Session, payload: dict) -> CouponTemplate:
+    scope = CouponScope(payload["scope"])
+    shop_id = payload.get("shop_id")
+    if scope == CouponScope.SHOP:
+        if shop_id is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="店铺券必须指定 shop_id"
+            )
+        if ShopDAO(db).get(shop_id) is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="店铺不存在"
+            )
+    else:
+        shop_id = None
+    payload["scope"] = scope
+    payload["shop_id"] = shop_id
+    _validate_coupon_fields(payload)
+    return CouponTemplateDAO(db).create(
+        name=payload["name"],
+        type=CouponType(payload["type"]),
+        value_fen=payload.get("value_fen", 0),
+        discount=payload.get("discount", 100),
+        min_amount_fen=payload.get("min_amount_fen", 0),
+        scope=scope,
+        shop_id=shop_id,
+        total_count=payload.get("total_count", 0),
+        per_user_limit=payload.get("per_user_limit", 1),
+        valid_from=payload["valid_from"],
+        valid_until=payload["valid_until"],
+    )
+
+
+def admin_update_coupon(db: Session, coupon_id: int, payload: dict) -> CouponTemplate:
+    coupon = CouponTemplateDAO(db).get(coupon_id)
+    if coupon is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="优惠券不存在"
+        )
+    _validate_coupon_fields(payload)
+    for field in (
+        "name",
+        "value_fen",
+        "discount",
+        "min_amount_fen",
+        "total_count",
+        "per_user_limit",
+        "valid_from",
+        "valid_until",
+    ):
+        if field in payload:
+            setattr(coupon, field, payload[field])
+    return coupon
+
+
+def admin_list_coupons(
+    db: Session, *, status_filter: CouponStatus | None, page: int, page_size: int
+) -> tuple[list[CouponTemplate], int]:
+    return CouponTemplateDAO(db).list_all(status_filter, page, page_size)
+
+
+def admin_set_coupon_status(
+    db: Session, coupon_id: int, *, on: bool
+) -> CouponTemplate:
+    coupon = CouponTemplateDAO(db).get(coupon_id)
+    if coupon is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="优惠券不存在"
+        )
+    if on:
+        if coupon.status != CouponStatus.PAUSED:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="当前状态不可上架"
+            )
+        coupon.status = CouponStatus.ACTIVE
+    else:
+        if coupon.status != CouponStatus.ACTIVE:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail="当前状态不可下架"
+            )
+        coupon.status = CouponStatus.PAUSED
+    return coupon
+
+
+def expire_coupons(db: Session) -> dict:
+    """优惠券过期清理（worker 每日执行）；幂等。"""
+    templates = CouponTemplateDAO(db).mark_expired_by_until()
+    user_coupons = UserCouponDAO(db).mark_expired()
+    return {"templates": templates, "user_coupons": user_coupons}
 
 
 # ---------------------------------------------------------------------------

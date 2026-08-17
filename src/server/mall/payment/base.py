@@ -30,6 +30,15 @@ class QueryResult:
     raw: dict | None = None
 
 
+@dataclass(frozen=True)
+class RefundResult:
+    """退款申请结果。"""
+
+    success: bool
+    refund_id: str | None = None
+    message: str = ""
+
+
 class PaymentProvider(ABC):
     """可替换的支付通道实现；mock 与真实微信支付共用该契约。"""
 
@@ -63,6 +72,18 @@ class PaymentProvider(ABC):
     @abstractmethod
     def verify_notification(self, headers: dict, body: bytes) -> dict | None:
         """验签并解密支付结果通知；无效通知返回 None。"""
+
+    @abstractmethod
+    def create_refund(
+        self,
+        *,
+        out_refund_no: str,
+        out_trade_no: str,
+        amount_fen: int,
+        total_fen: int,
+        description: str,
+    ) -> RefundResult:
+        """发起退款申请；退款结果可能异步到达（通过退款回调确认）。"""
 
     def health_check(self) -> dict:
         configured = self.is_configured()

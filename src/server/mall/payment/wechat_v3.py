@@ -9,7 +9,7 @@ from pathlib import Path
 
 from loguru import logger
 
-from .base import PaymentProvider, PrepayResult, QueryResult
+from .base import PaymentProvider, PrepayResult, QueryResult, RefundResult
 
 
 def _parse_wechat_datetime(value: str | None) -> datetime | None:
@@ -137,3 +137,29 @@ class WeChatPayV3Provider(PaymentProvider):
         except Exception as exc:
             logger.warning("微信支付通知验签失败：{}", exc)
             return None
+
+    def create_refund(
+        self,
+        *,
+        out_refund_no: str,
+        out_trade_no: str,
+        amount_fen: int,
+        total_fen: int,
+        description: str,
+    ) -> RefundResult:
+        client = self._get_client()
+        code, message = client.refund(
+            out_refund_no=out_refund_no,
+            out_trade_no=out_trade_no,
+            amount={"refund": amount_fen, "total": total_fen, "currency": "CNY"},
+            reason=description,
+        )
+        if code != 200:
+            logger.error("微信退款申请失败：{} {}", code, message)
+            return RefundResult(success=False, message=f"微信退款申请失败：{code}")
+        result = _parse_body(message)
+        return RefundResult(
+            success=True,
+            refund_id=result.get("refund_id"),
+            message=str(message),
+        )

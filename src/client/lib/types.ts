@@ -460,10 +460,20 @@ export type MallOrderStatus =
   | 'shipped'
   | 'completed'
   | 'cancelled'
+  | 'refunding'
+  | 'refunded'
 export type MallWithdrawStatus = 'pending' | 'approved' | 'rejected' | 'paid'
 export type MallLedgerType = 'sale' | 'withdraw' | 'deposit'
 export type MallLedgerStatus = 'frozen' | 'available' | 'withdrawn'
 export type MallChatSenderType = 'buyer' | 'seller'
+export type MallRefundType = 'refund_only' | 'return_refund'
+export type MallRefundStatus =
+  | 'pending'
+  | 'returning'
+  | 'refunding'
+  | 'success'
+  | 'rejected'
+  | 'cancelled'
 
 export interface MallPage<T> {
   items: T[]
@@ -586,6 +596,8 @@ export interface MallOrder {
   status: MallOrderStatus
   goods_amount_fen: number
   freight_fen: number
+  coupon_id: number | null
+  coupon_discount_fen: number
   pay_amount_fen: number
   receiver_name: string
   receiver_phone: string
@@ -601,9 +613,37 @@ export interface MallOrder {
   completed_at: string | null
   cancelled_at: string | null
   cancel_reason: string | null
+  refunded_at: string | null
   created_at: string
   items: MallOrderItem[]
   logs: MallOrderLog[]
+}
+
+export interface MallRefund {
+  id: number
+  refund_no: string
+  order_no: string
+  shop_id: number
+  shop_name: string | null
+  buyer_id: number
+  type: MallRefundType
+  status: MallRefundStatus
+  order_status_snapshot: MallOrderStatus | null
+  reason: string
+  description: string | null
+  evidence_images: string[]
+  amount_fen: number
+  return_tracking_company: string | null
+  return_tracking_no: string | null
+  return_shipped_at: string | null
+  return_received_at: string | null
+  channel: string | null
+  channel_refund_id: string | null
+  refuse_reason: string | null
+  decided_at: string | null
+  success_at: string | null
+  created_at: string
+  order: MallOrder | null
 }
 
 export interface MallOrderPreviewItem {
@@ -622,7 +662,120 @@ export interface MallOrderPreview {
   items: MallOrderPreviewItem[]
   goods_amount_fen: number
   freight_fen: number
+  coupon_discount_fen: number
   pay_amount_fen: number
+}
+
+export type MallCouponType = 'fixed' | 'discount'
+export type MallCouponScope = 'platform' | 'shop'
+export type MallCouponStatus = 'active' | 'paused' | 'expired'
+export type MallUserCouponStatus = 'unused' | 'used' | 'expired'
+
+export interface MallCouponTemplate {
+  id: number
+  name: string
+  type: MallCouponType
+  value_fen: number
+  discount: number
+  min_amount_fen: number
+  scope: MallCouponScope
+  shop_id: number | null
+  shop_name: string | null
+  total_count: number
+  received_count: number
+  per_user_limit: number
+  valid_from: string
+  valid_until: string
+  status: MallCouponStatus
+  created_at: string
+}
+
+export interface MallUserCoupon {
+  id: number
+  user_id: number
+  coupon_id: number
+  status: MallUserCouponStatus
+  order_no: string | null
+  received_at: string
+  used_at: string | null
+  expired_at: string | null
+  name: string | null
+  type: MallCouponType | null
+  value_fen: number | null
+  discount: number | null
+  min_amount_fen: number | null
+  scope: MallCouponScope | null
+  shop_id: number | null
+  shop_name: string | null
+  valid_until: string | null
+}
+
+export interface MallEvaluation {
+  id: number
+  order_id: number
+  order_no: string | null
+  order_item_id: number
+  goods_id: number
+  goods_name: string | null
+  goods_image: string | null
+  sku_specs: Record<string, string>
+  shop_id: number
+  buyer_id: number
+  buyer_username: string | null
+  rating: number
+  content: string
+  images: string[]
+  seller_reply: string | null
+  seller_replied_at: string | null
+  append_content: string | null
+  append_images: string[]
+  appended_at: string | null
+  created_at: string
+}
+
+export interface MallEvaluationSummary {
+  avg_rating: number
+  rating_count: number
+  good_rate: number
+  total: number
+}
+
+export interface PendingEvaluation {
+  order_no: string
+  order_item_id: number
+  goods_id: number
+  goods_name: string
+  goods_image: string
+  sku_specs: Record<string, string>
+  shop_id: number
+  shop_name: string
+}
+
+export interface GoodsEvaluationList extends MallPage<MallEvaluation> {
+  summary: MallEvaluationSummary
+}
+
+export type MallFavoriteTargetType = 'goods' | 'shop'
+
+export interface MallFavorite {
+  id: number
+  target_type: MallFavoriteTargetType
+  target_id: number
+  target_name: string | null
+  target_image: string | null
+  target_price_fen: number | null
+  shop_id: number | null
+  created_at: string
+}
+
+export interface MallFootprint {
+  goods_id: number
+  goods_name: string | null
+  goods_image: string | null
+  price_fen: number | null
+  shop_id: number
+  shop_name: string | null
+  viewed_at: string
 }
 
 export interface MallPaymentPrepay {
