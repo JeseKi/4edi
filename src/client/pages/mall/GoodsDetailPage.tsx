@@ -22,6 +22,7 @@ export default function GoodsDetailPage() {
   const { isAuthenticated } = useAuth()
   const { message } = App.useApp()
   const [goods, setGoods] = useState<MallGoodsDetail | null>(null)
+  const [selectedImage, setSelectedImage] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [selectedSku, setSelectedSku] = useState<MallGoodsSku | null>(null)
   const [quantity, setQuantity] = useState(1)
@@ -37,6 +38,7 @@ export default function GoodsDetailPage() {
     getMallGoodsDetail(goodsIdNum)
       .then((detail) => {
         setGoods(detail)
+        setSelectedImage(detail.main_image)
         if (detail.skus.length === 1) setSelectedSku(detail.skus[0])
       })
       .catch((err) => message.error(resolveApiErrorMessage(err, '商品加载失败')))
@@ -146,11 +148,40 @@ export default function GoodsDetailPage() {
   return (
     <>
       <div className="flex gap-6 items-start">
-      <div
-        className="shrink-0 rounded bg-white flex items-center justify-center overflow-hidden"
-        style={{ width: 420, height: 420, border: '1px solid #f0f0f0' }}
-      >
-        <img src={goods.main_image} alt={goods.name} className="w-full h-full object-cover" />
+      <div className="shrink-0" style={{ width: 420 }}>
+        <div
+          className="rounded bg-white flex items-center justify-center overflow-hidden"
+          style={{ width: 420, height: 420, border: '1px solid #f0f0f0' }}
+        >
+          <img
+            src={selectedImage ?? goods.main_image}
+            alt={goods.name}
+            className="w-full h-full object-cover"
+          />
+        </div>
+        {goods.images.length > 1 && (
+          <div className="flex gap-2 mt-3 overflow-x-auto pb-1">
+            {goods.images.map((url, index) => {
+              const active = (selectedImage ?? goods.main_image) === url
+              return (
+                <button
+                  key={`${url}-${index}`}
+                  type="button"
+                  aria-label={`查看商品图片 ${index + 1}`}
+                  onClick={() => setSelectedImage(url)}
+                  className="shrink-0 rounded overflow-hidden cursor-pointer bg-white"
+                  style={{
+                    width: 68,
+                    height: 68,
+                    border: active ? '2px solid #F31947' : '1px solid #e5e5e5',
+                  }}
+                >
+                  <img src={url} alt="" className="w-full h-full object-cover" />
+                </button>
+              )
+            })}
+          </div>
+        )}
       </div>
 
       <div className="flex-1 bg-white rounded" style={{ padding: '24px 28px' }}>
