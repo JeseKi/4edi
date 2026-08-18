@@ -283,16 +283,25 @@ export default function GoodsDetailPage() {
         )}
 
         <Divider />
-        <div className="text-sm" style={{ color: '#666' }}>
-          <div className="mb-1" style={{ color: '#333', fontWeight: 500 }}>
-            店铺：{goods.shop.name}
-          </div>
-          {goods.detail}
+        <div className="text-sm" style={{ color: '#333', fontWeight: 500 }}>
+          店铺：{goods.shop.name}
         </div>
       </div>
       </div>
 
-      <section className="rounded bg-white flex-1" style={{ padding: '20px 24px' }}>
+      <section className="rounded bg-white mt-4" style={{ padding: '20px 24px' }}>
+        <h3 className="text-base font-bold mb-3" style={{ color: '#333' }}>
+          商品详情
+        </h3>
+        <div
+          className="text-sm"
+          style={{ color: '#666', lineHeight: 1.8, whiteSpace: 'pre-line' }}
+        >
+          {goods.detail ?? '暂无商品详情'}
+        </div>
+      </section>
+
+      <section className="rounded bg-white mt-4 flex-1" style={{ padding: '20px 24px' }}>
         <h3 className="text-base font-bold mb-3" style={{ color: '#333' }}>
           商品评价
         </h3>

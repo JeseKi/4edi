@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 from pathlib import Path
 import sys
 
@@ -25,8 +26,18 @@ from src.server.auth.models import User
 from src.server.auth.schemas import UserRole
 from src.server.database import run_in_new_session
 from src.server.mall.config import mall_config
-from src.server.mall.dao import AddressDAO, CategoryDAO, GoodsDAO, ShopDAO, WalletDAO
-from src.server.mall.models import GoodsStatus, ShopStatus
+from src.server.mall.dao import (
+    AddressDAO,
+    CategoryDAO,
+    EvaluationDAO,
+    GoodsDAO,
+    GoodsSkuDAO,
+    OrderDAO,
+    OrderItemDAO,
+    ShopDAO,
+    WalletDAO,
+)
+from src.server.mall.models import Goods, GoodsStatus, OrderStatus, ShopStatus
 from src.server.mall.service import short_transactions as service
 
 
@@ -422,9 +433,12 @@ def _find_seed_goods(goods_dao: GoodsDAO, *, shop_id: int, item: GoodsSeed):
     return None
 
 
-def _seed_goods(db, *, seller: User, shop_id: int, category_map: dict[str, int], assets: dict[str, list[str]]) -> None:
+def _seed_goods(
+    db, *, seller: User, shop_id: int, category_map: dict[str, int], assets: dict[str, list[str]]
+) -> list[Goods]:
     principal = _principal_for_seller(seller)
     goods_dao = GoodsDAO(db)
+    seeded_goods: list[Goods] = []
     seeded_goods_ids: set[int] = set()
 
     for index, item in enumerate(GOODS, start=1):
@@ -439,6 +453,7 @@ def _seed_goods(db, *, seller: User, shop_id: int, category_map: dict[str, int],
 
         goods.status = GoodsStatus.ON
         goods.sales = max(goods.sales, index * 37)
+        seeded_goods.append(goods)
         seeded_goods_ids.add(goods.id)
         print(f"  商品已{action}：{goods.name}（{len(payload['images'])} 张图片）")
 
@@ -456,8 +471,10 @@ def _seed_goods(db, *, seller: User, shop_id: int, category_map: dict[str, int],
                 service.delete_goods(db, principal, goods.id)
                 print(f"  已清理重复演示商品：{goods.name}")
 
+    return seeded_goods
 
-def _ensure_buyer(db) -> None:
+
+def _ensure_buyer(db) -> User:
     buyer = _ensure_user(
         db,
         username=BUYER_USERNAME,
@@ -466,19 +483,120 @@ def _ensure_buyer(db) -> None:
         phone=BUYER_PHONE,
         role="user",
     )
-    if AddressDAO(db).list_for_user(buyer.id):
+    if not AddressDAO(db).list_for_user(buyer.id):
+        AddressDAO(db).create(
+            buyer.id,
+            receiver="示例买家",
+            phone=BUYER_PHONE,
+            province="浙江省",
+            city="杭州市",
+            district="西湖区",
+            detail="文三路示例园区 1 号",
+            is_default=True,
+        )
+        print("  示例买家与默认收货地址已创建")
+    return buyer
+
+
+def _seed_evaluations(
+    db,
+    *,
+    buyer: User,
+    shop,
+    goods_list: list[Goods],
+) -> None:
+    """为演示商品生成已完成订单与评价数据。"""
+    if not goods_list:
         return
-    AddressDAO(db).create(
-        buyer.id,
-        receiver="示例买家",
-        phone=BUYER_PHONE,
-        province="浙江省",
-        city="杭州市",
-        district="西湖区",
-        detail="文三路示例园区 1 号",
-        is_default=True,
+
+    sku_dao = GoodsSkuDAO(db)
+    order_dao = OrderDAO(db)
+    item_dao = OrderItemDAO(db)
+    eval_dao = EvaluationDAO(db)
+
+    existing = sum(
+        eval_dao.list_by_goods(goods.id, page=1, page_size=1)[1] for goods in goods_list
     )
-    print("  示例买家与默认收货地址已创建")
+    if existing:
+        print("  评价数据已存在，跳过")
+        return
+
+    review_templates: list[dict[str, int | str]] = [
+        {"rating": 5, "content": "质量很好，物流也很快，非常满意！"},
+        {"rating": 5, "content": "性价比很高，包装严实，会回购。"},
+        {"rating": 4, "content": "商品符合描述，做工不错，物流速度一般。"},
+        {"rating": 5, "content": "物美价廉，卖家服务态度也很好。"},
+        {"rating": 4, "content": "使用了一段时间，整体体验不错，推荐。"},
+        {"rating": 5, "content": "发货速度很快，第二天就到了，好评！"},
+        {"rating": 3, "content": "质量还可以，就是颜色和图片有点色差。"},
+        {"rating": 5, "content": "超出预期，功能很实用，值得信赖。"},
+        {"rating": 4, "content": "整体满意，包装可以再厚实一点。"},
+        {"rating": 5, "content": "第二次购买了，家里人都很满意。"},
+        {"rating": 4, "content": "不错的产品，客服回复也很及时。"},
+        {"rating": 5, "content": "非常喜欢，会推荐给朋友。"},
+    ]
+    seller_replies: list[str | None] = [
+        "感谢您的认可，我们会继续努力！",
+        "亲的好评是我们最大的动力，欢迎再次光临！",
+        None,
+        "谢谢支持，祝您生活愉快！",
+    ]
+
+    now = datetime.now(timezone.utc)
+    created_count = 0
+
+    for goods in goods_list:
+        skus = sku_dao.list_by_goods(goods.id)
+        if not skus:
+            continue
+        sku = skus[0]
+        for i in range(2):
+            template = review_templates[(goods.id + i) % len(review_templates)]
+            rating = int(template["rating"])
+            content = str(template["content"])
+            order = order_dao.create(
+                order_no=service._gen_business_no("M"),
+                buyer_id=buyer.id,
+                shop_id=shop.id,
+                goods_amount_fen=sku.price_fen,
+                freight_fen=0,
+                pay_amount_fen=sku.price_fen,
+                receiver_name="示例买家",
+                receiver_phone=BUYER_PHONE,
+                receiver_address="浙江省杭州市西湖区文三路示例园区 1 号",
+                remark=None,
+            )
+            order.status = OrderStatus.COMPLETED
+            order.completed_at = now
+
+            item = item_dao.create_many(
+                order_id=order.id,
+                goods_id=goods.id,
+                sku_id=sku.id,
+                goods_name=goods.name,
+                goods_image=goods.main_image,
+                sku_specs=sku.specs,
+                unit_price_fen=sku.price_fen,
+                quantity=1,
+                subtotal_fen=sku.price_fen,
+            )
+            evaluation = eval_dao.create(
+                order_id=order.id,
+                order_item_id=item.id,
+                goods_id=goods.id,
+                shop_id=shop.id,
+                buyer_id=buyer.id,
+                rating=rating,
+                content=content,
+                images=[],
+            )
+            reply = seller_replies[(goods.id + i) % len(seller_replies)]
+            if reply:
+                evaluation.seller_reply = reply
+                evaluation.seller_replied_at = now
+            created_count += 1
+
+    print(f"  已创建 {created_count} 条演示评价")
 
 
 def _seed(db, *, assets: dict[str, list[str]]) -> None:
@@ -492,14 +610,15 @@ def _seed(db, *, assets: dict[str, list[str]]) -> None:
         role="user",
     )
     shop = _ensure_shop(db, seller)
-    _seed_goods(
+    goods_list = _seed_goods(
         db,
         seller=seller,
         shop_id=shop.id,
         category_map=category_map,
         assets=assets,
     )
-    _ensure_buyer(db)
+    buyer = _ensure_buyer(db)
+    _seed_evaluations(db, buyer=buyer, shop=shop, goods_list=goods_list)
 
     print("种子数据就绪。")
     print(f"  商品数量：{len(GOODS)}")

@@ -146,16 +146,95 @@ export default function MallLayout() {
           <Outlet />
         </main>
 
-        <footer className="text-center text-xs py-6" style={{ color: '#999', background: '#fff' }}>
-          沐泽商城 ·{' '}
-          <a
-            href="https://beian.miit.gov.cn/"
-            target="_blank"
-            rel="noopener noreferrer"
-            style={{ color: '#999' }}
-          >
-            浙ICP备2026035190号-1
-          </a>
+        <footer style={{ color: '#666', background: '#fff' }}>
+          <div className="mx-auto px-4" style={{ maxWidth: 1184 }}>
+            <div
+              className="flex flex-wrap justify-around gap-y-4 py-8"
+              style={{ borderBottom: '1px solid #f5f5f5' }}
+            >
+              {[
+                { icon: '多', text: '品类齐全，轻松购物' },
+                { icon: '快', text: '多仓直发，极速配送' },
+                { icon: '好', text: '正品行货，精致服务' },
+                { icon: '省', text: '天天低价，畅选无忧' },
+              ].map((item) => (
+                <div key={item.icon} className="flex items-center gap-3">
+                  <span
+                    className="flex items-center justify-center rounded-full text-sm font-medium"
+                    style={{
+                      width: 40,
+                      height: 40,
+                      border: `1px solid ${MALL_PRIMARY}`,
+                      color: MALL_PRIMARY,
+                    }}
+                  >
+                    {item.icon}
+                  </span>
+                  <span className="text-sm" style={{ color: '#333' }}>
+                    {item.text}
+                  </span>
+                </div>
+              ))}
+            </div>
+
+            <div className="flex flex-wrap justify-between gap-y-6 py-8">
+              {[
+                {
+                  title: '购物指南',
+                  items: ['购物流程', '会员介绍', '生活旅行', '常见问题'],
+                },
+                {
+                  title: '配送方式',
+                  items: ['上门自提', '配送查询', '收取标准', '物流规则'],
+                },
+                {
+                  title: '支付方式',
+                  items: ['在线支付', '公司转账', '余额支付', '积分支付'],
+                },
+                {
+                  title: '售后服务',
+                  items: ['售后政策', '退款说明', '返修/退货', '取消订单'],
+                },
+              ].map((col) => (
+                <div key={col.title} style={{ minWidth: 140 }}>
+                  <div
+                    className="text-sm font-bold mb-3"
+                    style={{ color: '#333' }}
+                  >
+                    {col.title}
+                  </div>
+                  <ul className="space-y-2">
+                    {col.items.map((text) => (
+                      <li key={text} className="text-xs" style={{ color: '#999' }}>
+                        {text}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ))}
+            </div>
+
+            <div
+              className="text-center text-sm py-4"
+              style={{ color: '#666', borderTop: '1px solid #f5f5f5' }}
+            >
+              关于我们 · 联系我们 · 联系客服 · 商家帮助 · 隐私政策
+            </div>
+
+            <div className="text-center text-xs pb-6" style={{ color: '#999' }}>
+              沐泽商城 ·{' '}
+              <a
+                href="https://beian.miit.gov.cn/"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{ color: '#999' }}
+              >
+                浙ICP备2026035190号-1
+              </a>
+              <br />
+              Copyright © 2026 沐泽健康
+            </div>
+          </div>
         </footer>
       </div>
     </ConfigProvider>
