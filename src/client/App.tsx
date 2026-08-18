@@ -28,6 +28,8 @@ import CouponCenterPage from './pages/mall/CouponCenterPage'
 import FavoritesPage from './pages/mall/FavoritesPage'
 import FootprintsPage from './pages/mall/FootprintsPage'
 import ChatPage from './pages/mall/ChatPage'
+import HelpCenterPage from './pages/mall/HelpCenterPage'
+import SiteInfoPage from './pages/mall/SiteInfoPage'
 import SellerLayout from './components/mall/SellerLayout'
 import ShopManagePage from './pages/mall/seller/ShopManagePage'
 import GoodsManagePage from './pages/mall/seller/GoodsManagePage'
@@ -110,6 +112,8 @@ function AppRoutes() {
             <Route path="/mall/favorites" element={<RequireAuth><FavoritesPage /></RequireAuth>} />
             <Route path="/mall/footprints" element={<RequireAuth><FootprintsPage /></RequireAuth>} />
             <Route path="/mall/chat" element={<RequireAuth><ChatPage /></RequireAuth>} />
+            <Route path="/mall/help" element={<HelpCenterPage />} />
+            <Route path="/mall/info/:key" element={<SiteInfoPage />} />
           </Route>
         )}
         {hasFeature('mall') && (

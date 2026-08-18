@@ -181,19 +181,39 @@ export default function MallLayout() {
               {[
                 {
                   title: '购物指南',
-                  items: ['购物流程', '会员介绍', '生活旅行', '常见问题'],
+                  items: [
+                    { text: '购物流程', id: 'shopping-process' },
+                    { text: '会员介绍', id: 'member-intro' },
+                    { text: '生活旅行', id: 'life-travel' },
+                    { text: '常见问题', id: 'faq' },
+                  ],
                 },
                 {
                   title: '配送方式',
-                  items: ['上门自提', '配送查询', '收取标准', '物流规则'],
+                  items: [
+                    { text: '上门自提', id: 'self-pickup' },
+                    { text: '配送查询', id: 'delivery-query' },
+                    { text: '收取标准', id: 'shipping-fee' },
+                    { text: '物流规则', id: 'logistics-rule' },
+                  ],
                 },
                 {
                   title: '支付方式',
-                  items: ['在线支付', '公司转账', '余额支付', '积分支付'],
+                  items: [
+                    { text: '在线支付', id: 'online-pay' },
+                    { text: '公司转账', id: 'company-transfer' },
+                    { text: '余额支付', id: 'balance-pay' },
+                    { text: '积分支付', id: 'points-pay' },
+                  ],
                 },
                 {
                   title: '售后服务',
-                  items: ['售后政策', '退款说明', '返修/退货', '取消订单'],
+                  items: [
+                    { text: '售后政策', id: 'after-sale-policy' },
+                    { text: '退款说明', id: 'refund-desc' },
+                    { text: '返修/退货', id: 'repair-return' },
+                    { text: '取消订单', id: 'cancel-order' },
+                  ],
                 },
               ].map((col) => (
                 <div key={col.title} style={{ minWidth: 140 }}>
@@ -204,9 +224,9 @@ export default function MallLayout() {
                     {col.title}
                   </div>
                   <ul className="space-y-2">
-                    {col.items.map((text) => (
-                      <li key={text} className="text-xs" style={{ color: '#999' }}>
-                        {text}
+                    {col.items.map((item) => (
+                      <li key={item.id} className="text-xs" style={{ color: '#999' }}>
+                        <Link to={`/mall/help#${item.id}`}>{item.text}</Link>
                       </li>
                     ))}
                   </ul>
@@ -218,7 +238,15 @@ export default function MallLayout() {
               className="text-center text-sm py-4"
               style={{ color: '#666', borderTop: '1px solid #f5f5f5' }}
             >
-              关于我们 · 联系我们 · 联系客服 · 商家帮助 · 隐私政策
+              <Link to="/mall/info/about">关于我们</Link>
+              <span style={{ margin: '0 8px', color: '#ddd' }}>·</span>
+              <Link to="/mall/info/contact">联系我们</Link>
+              <span style={{ margin: '0 8px', color: '#ddd' }}>·</span>
+              <Link to="/mall/info/service">联系客服</Link>
+              <span style={{ margin: '0 8px', color: '#ddd' }}>·</span>
+              <Link to="/mall/info/seller-help">商家帮助</Link>
+              <span style={{ margin: '0 8px', color: '#ddd' }}>·</span>
+              <Link to="/mall/info/privacy">隐私政策</Link>
             </div>
 
             <div className="text-center text-xs pb-6" style={{ color: '#999' }}>
