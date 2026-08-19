@@ -766,11 +766,12 @@ def confirm_receipt_by_no(db: Session, order_no: str) -> Order:
     if order.status not in (OrderStatus.PAID, OrderStatus.SHIPPED):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="当前订单状态不可确认收货")
     order.status = OrderStatus.COMPLETED
-    order.completed_at = _utcnow()
+    completed_at = _utcnow()
+    order.completed_at = completed_at
     if order.shipping_traces:
         traces = list(order.shipping_traces)
         traces.append(
-            {"time": order.completed_at.isoformat(), "text": "已签收，订单完成"}
+            {"time": completed_at.isoformat(), "text": "已签收，订单完成"}
         )
         order.shipping_traces = traces
     wallet = WalletDAO(db).get_or_create(order.shop_id)

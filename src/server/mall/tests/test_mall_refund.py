@@ -177,7 +177,9 @@ def test_refund_only_full_flow(test_client, test_db_session, init_test_database)
         from src.server.mall.dao import GoodsDAO, GoodsSkuDAO
 
         goods = GoodsDAO(db).get(goods_id)
+        assert goods is not None
         sku = GoodsSkuDAO(db).get(sku_id)
+        assert sku is not None
         return goods.stock, goods.sales, sku.stock
 
     stock, sales, sku_stock = _stock_sales(test_db_session)
@@ -425,7 +427,9 @@ def test_refund_validation_and_idempotency(test_client, test_db_session, init_te
         )
         from src.server.mall.dao import GoodsSkuDAO
 
-        return GoodsSkuDAO(db).get(sku_id).stock
+        sku = GoodsSkuDAO(db).get(sku_id)
+        assert sku is not None
+        return sku.stock
 
     stock_after = _idempotent_callback(test_db_session)
     assert stock_after == 9  # 库存未被重复回补（另有 1 件被未支付订单占用）
@@ -506,22 +510,29 @@ def test_auto_agree_refund_worker(test_client, test_db_session, init_test_databa
 
     # 未超时：不处理
     mall_service.auto_agree_refund(test_db_session, refund.refund_no)
-    assert RefundDAO(test_db_session).get_by_no(refund.refund_no).status == RefundStatus.PENDING
+    pending = RefundDAO(test_db_session).get_by_no(refund.refund_no)
+    assert pending is not None
+    assert pending.status == RefundStatus.PENDING
 
     # 把创建时间改到超时之前
     def _backdate(db):
         item = RefundDAO(db).get_by_no(refund.refund_no)
+        assert item is not None
         item.created_at = item.created_at - timedelta(hours=100)
 
     _backdate(test_db_session)
     test_db_session.commit()
     mall_service.auto_agree_refund(test_db_session, refund.refund_no)
-    assert RefundDAO(test_db_session).get_by_no(refund.refund_no).status == RefundStatus.SUCCESS
+    success = RefundDAO(test_db_session).get_by_no(refund.refund_no)
+    assert success is not None
+    assert success.status == RefundStatus.SUCCESS
     test_db_session.commit()
 
     # 已成功再触发：幂等
     mall_service.auto_agree_refund(test_db_session, refund.refund_no)
-    assert RefundDAO(test_db_session).get_by_no(refund.refund_no).status == RefundStatus.SUCCESS
+    idle = RefundDAO(test_db_session).get_by_no(refund.refund_no)
+    assert idle is not None
+    assert idle.status == RefundStatus.SUCCESS
     test_db_session.commit()
 
     resp = test_client.get(f"/api/mall/orders/{order_no}", headers=buyer_headers)

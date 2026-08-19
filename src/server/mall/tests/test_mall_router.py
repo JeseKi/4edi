@@ -254,6 +254,7 @@ def test_full_buyer_seller_flow(test_client, test_db_session, init_test_database
     assert resp.status_code == 200, resp.text
     shipped = OrderOut.model_validate(resp.json())
     assert shipped.status == OrderStatus.SHIPPED
+    assert shipped.shipping_traces is not None
     assert len(shipped.shipping_traces) == 3
 
     # 买家查看物流轨迹
@@ -422,12 +423,17 @@ def test_payment_timeout_task_cancels_order(test_db_session, test_client, init_t
 
     def _check(db):
         order = OrderDAO(db).get_by_no(order_no)
+        assert order is not None
         assert order.status == OrderStatus.CANCELLED
         assert order.cancel_reason == "支付超时，系统自动取消"
         from src.server.mall.dao import GoodsDAO, GoodsSkuDAO
 
-        assert GoodsSkuDAO(db).get(sku_id).stock == 10
-        assert GoodsDAO(db).get(goods_id).stock == 15
+        sku = GoodsSkuDAO(db).get(sku_id)
+        assert sku is not None
+        assert sku.stock == 10
+        goods = GoodsDAO(db).get(goods_id)
+        assert goods is not None
+        assert goods.stock == 15
 
     _check(test_db_session)
 
@@ -738,11 +744,14 @@ def test_payment_is_idempotent(test_client, test_db_session, init_test_database)
 
     def _check(db):
         payment = PaymentDAO(db).get_by_out_trade_no(out_trade_no)
+        assert payment is not None
         assert payment.status == PaymentStatus.SUCCESS
         wallet = WalletDAO(db).get(shop_id)
+        assert wallet is not None
         assert wallet.frozen_fen == 9900
         assert wallet.available_fen == 0
         order = OrderDAO(db).get_by_no(order_no)
+        assert order is not None
         assert order.status == OrderStatus.PAID
 
     _check(test_db_session)

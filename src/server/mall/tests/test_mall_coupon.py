@@ -593,6 +593,7 @@ def test_coupon_expire_worker(test_client, test_db_session, init_test_database):
 
     def _backdate(db):
         item = UserCouponDAO(db).get(user_coupon["id"])
+        assert item is not None
         item.expired_at = _utcnow() - timedelta(hours=1)
 
     _backdate(test_db_session)
@@ -604,7 +605,9 @@ def test_coupon_expire_worker(test_client, test_db_session, init_test_database):
     assert result["user_coupons"] == 1
     test_db_session.commit()
 
-    assert UserCouponDAO(test_db_session).get(user_coupon["id"]).status == UserCouponStatus.EXPIRED
+    item = UserCouponDAO(test_db_session).get(user_coupon["id"])
+    assert item is not None
+    assert item.status == UserCouponStatus.EXPIRED
 
     # 幂等：重复清理不再变化
     result2 = mall_service.expire_coupons(test_db_session)

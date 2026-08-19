@@ -176,7 +176,8 @@ class WeChatPayV3Provider(PaymentProvider):
     def verify_notification(self, headers: dict, body: bytes) -> dict | None:
         client = self._get_client()
         try:
-            return client.callback(headers=headers, body=body)
+            callback_result = client.callback(headers=headers, body=body)
+            return callback_result if isinstance(callback_result, dict) else None
         except Exception as exc:
             logger.warning("微信支付通知验签失败：{}", exc)
             return None

@@ -6,7 +6,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 import random
 import string
-from typing import cast
+from typing import TypedDict, cast
 
 from loguru import logger
 
@@ -22,7 +22,16 @@ VERIFICATION_CODE_MAX_ATTEMPTS = 5
 VERIFICATION_CODE_EXPIRES_MINUTES = 5
 VERIFICATION_CODE_SEND_COOLDOWN_SECONDS = 60
 
-verification_codes: dict[str, dict[str, str | datetime | int]] = {}
+class VerificationCodeData(TypedDict):
+    """验证码存储结构。"""
+
+    code: str
+    expiry: datetime
+    sent_at: datetime
+    attempts: int
+
+
+verification_codes: dict[str, VerificationCodeData] = {}
 
 
 def generate_verification_code(length: int = 6) -> str:

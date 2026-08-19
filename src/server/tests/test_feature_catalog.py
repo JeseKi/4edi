@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import pytest
 
+from src.server.config import global_config
 from src.server.platform.features import resolve_features, task_definitions_for
 
 
@@ -56,15 +57,8 @@ def test_frontend_config_exposes_the_resolved_web_surface(test_client) -> None:
     response = test_client.get("/api/frontend-config")
 
     assert response.status_code == 200
-    assert set(response.json()["features"]) == {
-        "admin",
-        "audit",
-        "auth",
-        "example",
-        "files",
-        "frontend-error-reporting",
-        "oauth-login",
-        "oauth-provider",
-        "notifications",
-        "mall",
+    expected = {
+        spec.name
+        for spec in resolve_features(["all"], app_env=global_config.app.env)
     }
+    assert set(response.json()["features"]) == expected
