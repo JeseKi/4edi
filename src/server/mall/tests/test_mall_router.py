@@ -301,6 +301,36 @@ def test_full_buyer_seller_flow(test_client, test_db_session, init_test_database
     assert resp.json()["stock"] == 13
 
 
+def test_delete_cart_items_by_repeated_query_params(test_client, init_test_database):
+    """删除购物车项：FastAPI 的 list[int] Query 接受重复 key（item_ids=1），前端不应带方括号。"""
+    seller_headers = _login(test_client, username=_register(test_client, username="dc-seller", email="dc-seller@test.com"))
+    buyer_headers = _login(test_client, username=_register(test_client, username="dc-buyer", email="dc-buyer@test.com"))
+    admin_headers = _login_admin(test_client)
+
+    _, goods_id, sku_id = _seed_shop_and_goods(
+        test_client, seller_headers=seller_headers, admin_headers=admin_headers
+    )
+
+    resp = test_client.post(
+        "/api/mall/cart/items",
+        json={"goods_id": goods_id, "sku_id": sku_id, "quantity": 1},
+        headers=buyer_headers,
+    )
+    assert resp.status_code == 201, resp.text
+    cart_item_id = resp.json()["id"]
+
+    resp = test_client.delete(
+        f"/api/mall/cart/items?item_ids={cart_item_id}",
+        headers=buyer_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"deleted": 1}
+
+    resp = test_client.get("/api/mall/cart", headers=buyer_headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == []
+
+
 def _all_ledgers(db, shop_id):
     from src.server.mall.models import WalletLedger
 

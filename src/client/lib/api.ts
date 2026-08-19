@@ -8,6 +8,7 @@ export const TWO_FACTOR_CODE_HEADER = 'X-2FA-Code'
 const api = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL ?? '/api',
   withCredentials: true,
+  paramsSerializer: { indexes: null },
 })
 
 let refreshRequest: Promise<string | null> | null = null
