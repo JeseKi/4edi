@@ -113,6 +113,12 @@ def _mall_routers() -> tuple[APIRouter, ...]:
     return (router, seller_router, admin_router)
 
 
+def _information_routers() -> tuple[APIRouter, ...]:
+    from src.server.information.router import admin_router, router
+
+    return (router, admin_router)
+
+
 def _mall_tasks() -> tuple[TaskDefinition, ...]:
     from src.server.mall.service import (
         MALL_COUPON_EXPIRE,
@@ -167,6 +173,9 @@ FEATURE_CATALOG: dict[str, FeatureSpec] = {
     ),
     "mall": FeatureSpec(
         "mall", frozenset({"auth"}), _mall_routers, _mall_tasks
+    ),
+    "information": FeatureSpec(
+        "information", frozenset({"auth"}), _information_routers
     ),
     "dev-providers": FeatureSpec(
         "dev-providers", frozenset(), _routers(_dev_provider_router), dev_only=True

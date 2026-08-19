@@ -7,6 +7,7 @@ import {
   UserOutlined,
 } from '@ant-design/icons'
 import { useAuth } from '../../hooks/useAuth'
+import { useRuntimeConfig } from '../../hooks/useRuntimeConfig'
 import { listMallCart } from '../../lib/mall'
 import { resolveApiErrorMessage } from '../../lib/error'
 
@@ -14,11 +15,13 @@ const MALL_PRIMARY = '#F31947'
 
 export default function MallLayout() {
   const { user, isAuthenticated, logout } = useAuth()
+  const { features } = useRuntimeConfig()
   const { message } = App.useApp()
   const navigate = useNavigate()
   const location = useLocation()
   const [keyword, setKeyword] = useState('')
   const [cartCount, setCartCount] = useState(0)
+  const infoEnabled = new Set(features).has('information')
 
   useEffect(() => {
     let cancelled = false
@@ -112,6 +115,11 @@ export default function MallLayout() {
               <Link to="/mall/seller/shop" className="hover:opacity-80">
                 申请开店
               </Link>
+              {infoEnabled && (
+                <Link to="/mall/information" className="hover:opacity-80">
+                  信息发布
+                </Link>
+              )}
               <Badge count={cartCount} size="small" color={MALL_PRIMARY}>
                 <Button
                   type="text"

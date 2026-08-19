@@ -116,6 +116,7 @@ def test_database_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
     import src.server.files.models  # noqa: F401
     import src.server.notifications.models  # noqa: F401
     import src.server.mall.models  # noqa: F401
+    import src.server.information.models  # noqa: F401
 
     try:
         Base.metadata.create_all(bind=engine)
@@ -226,7 +227,7 @@ def test_client(
     )
     app.state.runtime = ApplicationRuntime(
         settings=global_config,
-        enabled_features=frozenset({"auth", "admin", "audit", "oauth-login", "oauth-provider", "files", "example", "notifications", "mall"}),
+        enabled_features=frozenset({"auth", "admin", "audit", "oauth-login", "oauth-provider", "files", "example", "notifications", "mall", "information"}),
         database_executor=database_executor,
         mail_delivery_executor=mail_delivery_executor,
         task_runtime=task_runtime,

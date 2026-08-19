@@ -30,6 +30,7 @@ import {
   ShopOutlined,
   TransactionOutlined,
   GiftOutlined,
+  SendOutlined,
 } from '@ant-design/icons'
 import { Link, Outlet, useLocation, useNavigate } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
@@ -183,6 +184,15 @@ export default function MainLayout() {
             icon: <GiftOutlined />,
             label: <Link to="/mall/admin/coupons">优惠券管理</Link>,
           },
+          ...(enabledFeatures.has('information')
+            ? [
+                {
+                  key: 'mall-admin-information',
+                  icon: <SendOutlined />,
+                  label: <Link to="/mall/admin/information">信息审核</Link>,
+                },
+              ]
+            : []),
         )
       }
       items.push({

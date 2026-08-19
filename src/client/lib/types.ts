@@ -860,3 +860,58 @@ export interface MallChatConversation {
   last_message_at: string | null
   unread_count: number
 }
+
+// ---------------------------------------------------------------------------
+// 信息发布（分类信息中心）
+// ---------------------------------------------------------------------------
+
+export type InfoStatus = 'pending' | 'approved' | 'rejected'
+
+export interface InfoAttributeField {
+  key: string
+  label: string
+  type: 'text' | 'select' | 'textarea'
+  options?: string[]
+}
+
+export interface InfoCategory {
+  key: string
+  name: string
+  attributes: InfoAttributeField[]
+}
+
+export interface InformationPost {
+  id: number
+  title: string
+  category: string
+  category_name: string
+  price: string | null
+  poster_username: string
+  view_count: number
+  is_top: boolean
+  created_at: string
+}
+
+export interface InformationPostDetail extends InformationPost {
+  content: string
+  attributes: Record<string, string> | null
+  contact_name: string
+  contact_phone: string | null
+  approved_at: string | null
+}
+
+export interface InformationMinePost extends InformationPostDetail {
+  status: InfoStatus
+  reject_reason: string | null
+}
+
+export interface InformationAdminPost extends InformationMinePost {
+  poster_user_id: number
+}
+
+export interface InformationPage {
+  items: InformationPost[]
+  total: number
+  page: number
+  page_size: number
+}

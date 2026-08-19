@@ -31,6 +31,11 @@ import FootprintsPage from './pages/mall/FootprintsPage'
 import ChatPage from './pages/mall/ChatPage'
 import HelpCenterPage from './pages/mall/HelpCenterPage'
 import SiteInfoPage from './pages/mall/SiteInfoPage'
+import InformationCenterPage from './pages/mall/information/InformationCenterPage'
+import InformationDetailPage from './pages/mall/information/InformationDetailPage'
+import InformationPostPage from './pages/mall/information/InformationPostPage'
+import InformationMinePage from './pages/mall/information/InformationMinePage'
+import InformationAdminPage from './pages/mall/admin/InformationAdminPage'
 import SellerLayout from './components/mall/SellerLayout'
 import ShopManagePage from './pages/mall/seller/ShopManagePage'
 import GoodsManagePage from './pages/mall/seller/GoodsManagePage'
@@ -116,6 +121,14 @@ function AppRoutes() {
             <Route path="/mall/chat" element={<RequireAuth><ChatPage /></RequireAuth>} />
             <Route path="/mall/help" element={<HelpCenterPage />} />
             <Route path="/mall/info/:key" element={<SiteInfoPage />} />
+            {hasFeature('information') && (
+              <>
+                <Route path="/mall/information" element={<InformationCenterPage />} />
+                <Route path="/mall/information/post" element={<RequireAuth><InformationPostPage /></RequireAuth>} />
+                <Route path="/mall/information/mine" element={<RequireAuth><InformationMinePage /></RequireAuth>} />
+                <Route path="/mall/information/:postId" element={<InformationDetailPage />} />
+              </>
+            )}
           </Route>
         )}
         {hasFeature('mall') && (
@@ -138,6 +151,9 @@ function AppRoutes() {
         )}
         {hasFeature('mall') && (
           <Route path="/mall/admin/coupons" element={<RequireAdmin><CouponAdminPage /></RequireAdmin>} />
+        )}
+        {hasFeature('information') && (
+          <Route path="/mall/admin/information" element={<RequireAdmin><InformationAdminPage /></RequireAdmin>} />
         )}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

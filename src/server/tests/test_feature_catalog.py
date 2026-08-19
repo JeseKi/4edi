@@ -31,6 +31,7 @@ def test_all_expands_to_non_development_features_outside_dev() -> None:
         "oauth-provider",
         "notifications",
         "mall",
+        "information",
     }
 
 

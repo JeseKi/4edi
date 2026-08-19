@@ -10,7 +10,7 @@
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 import sys
 
@@ -39,6 +39,8 @@ from src.server.mall.dao import (
 )
 from src.server.mall.models import Goods, GoodsStatus, OrderStatus, Shop, ShopStatus
 from src.server.mall.service import short_transactions as service
+from src.server.information.dao import InformationPostDAO
+from src.server.information.models import InformationPost, InformationStatus
 
 
 class GoodsSeed(TypedDict):
@@ -49,6 +51,22 @@ class GoodsSeed(TypedDict):
     original_price_fen: int
     detail: str
     skus: list[dict]
+
+
+class InformationSeed(TypedDict):
+    title: str
+    category: str
+    price: str
+    content: str
+    contact_name: str
+    contact_phone: str
+    attributes: dict[str, str]
+    poster: str
+    status: InformationStatus
+    is_top: bool
+    view_count: int
+    age_days: int
+    reject_reason: str | None
 
 
 CATEGORIES = [
@@ -81,9 +99,24 @@ GOODS: list[GoodsSeed] = [
             "耳机具备 IP54 日常防尘防泼溅能力。包装内含耳机、充电盒、S/M/L 三组耳塞和 USB-C 充电线。"
         ),
         "skus": [
-            {"sku_code": "AT-PRO-IVORY", "specs": {"颜色": "云岩白"}, "price_fen": 29900, "stock": 90},
-            {"sku_code": "AT-PRO-BLACK", "specs": {"颜色": "曜石黑"}, "price_fen": 29900, "stock": 80},
-            {"sku_code": "AT-PRO-BLUE", "specs": {"颜色": "雾霾蓝"}, "price_fen": 31900, "stock": 50},
+            {
+                "sku_code": "AT-PRO-IVORY",
+                "specs": {"颜色": "云岩白"},
+                "price_fen": 29900,
+                "stock": 90,
+            },
+            {
+                "sku_code": "AT-PRO-BLACK",
+                "specs": {"颜色": "曜石黑"},
+                "price_fen": 29900,
+                "stock": 80,
+            },
+            {
+                "sku_code": "AT-PRO-BLUE",
+                "specs": {"颜色": "雾霾蓝"},
+                "price_fen": 31900,
+                "stock": 50,
+            },
         ],
     },
     {
@@ -98,9 +131,24 @@ GOODS: list[GoodsSeed] = [
             "支持消息提醒、蓝牙通话、音乐控制、闹钟与久坐提醒。健康数据仅用于日常趋势参考，不替代医疗设备。"
         ),
         "skus": [
-            {"sku_code": "PS2-BLACK-SIL", "specs": {"表壳": "曜石黑", "表带": "硅胶"}, "price_fen": 59900, "stock": 60},
-            {"sku_code": "PS2-SILVER-SIL", "specs": {"表壳": "星辉银", "表带": "硅胶"}, "price_fen": 61900, "stock": 50},
-            {"sku_code": "PS2-SILVER-LEA", "specs": {"表壳": "星辉银", "表带": "皮革"}, "price_fen": 66900, "stock": 40},
+            {
+                "sku_code": "PS2-BLACK-SIL",
+                "specs": {"表壳": "曜石黑", "表带": "硅胶"},
+                "price_fen": 59900,
+                "stock": 60,
+            },
+            {
+                "sku_code": "PS2-SILVER-SIL",
+                "specs": {"表壳": "星辉银", "表带": "硅胶"},
+                "price_fen": 61900,
+                "stock": 50,
+            },
+            {
+                "sku_code": "PS2-SILVER-LEA",
+                "specs": {"表壳": "星辉银", "表带": "皮革"},
+                "price_fen": 66900,
+                "stock": 40,
+            },
         ],
     },
     {
@@ -115,9 +163,24 @@ GOODS: list[GoodsSeed] = [
             "适合办公与轻度游戏。标配双色 PBT 键帽、拔键器/拔轴器和 USB-C 数据线。"
         ),
         "skus": [
-            {"sku_code": "K75-WHITE-LINEAR", "specs": {"配色": "雾白", "轴体": "线性轴"}, "price_fen": 39900, "stock": 45},
-            {"sku_code": "K75-WHITE-TACTILE", "specs": {"配色": "雾白", "轴体": "段落轴"}, "price_fen": 41900, "stock": 35},
-            {"sku_code": "K75-GRAY-LINEAR", "specs": {"配色": "深空灰", "轴体": "线性轴"}, "price_fen": 39900, "stock": 40},
+            {
+                "sku_code": "K75-WHITE-LINEAR",
+                "specs": {"配色": "雾白", "轴体": "线性轴"},
+                "price_fen": 39900,
+                "stock": 45,
+            },
+            {
+                "sku_code": "K75-WHITE-TACTILE",
+                "specs": {"配色": "雾白", "轴体": "段落轴"},
+                "price_fen": 41900,
+                "stock": 35,
+            },
+            {
+                "sku_code": "K75-GRAY-LINEAR",
+                "specs": {"配色": "深空灰", "轴体": "线性轴"},
+                "price_fen": 39900,
+                "stock": 40,
+            },
         ],
     },
     {
@@ -132,8 +195,18 @@ GOODS: list[GoodsSeed] = [
             "长时间抬高屏幕办公时建议搭配外接键鼠使用。"
         ),
         "skus": [
-            {"sku_code": "FSX-SILVER", "specs": {"颜色": "银色"}, "price_fen": 10900, "stock": 120},
-            {"sku_code": "FSX-GRAY", "specs": {"颜色": "深空灰"}, "price_fen": 11900, "stock": 100},
+            {
+                "sku_code": "FSX-SILVER",
+                "specs": {"颜色": "银色"},
+                "price_fen": 10900,
+                "stock": 120,
+            },
+            {
+                "sku_code": "FSX-GRAY",
+                "specs": {"颜色": "深空灰"},
+                "price_fen": 11900,
+                "stock": 100,
+            },
         ],
     },
     {
@@ -148,9 +221,24 @@ GOODS: list[GoodsSeed] = [
             "首次使用建议用温水和中性清洁剂充分清洗，不建议盛放碳酸饮料或长时间存放乳制品。"
         ),
         "skus": [
-            {"sku_code": "TG500-PINK", "specs": {"颜色": "樱花粉"}, "price_fen": 8900, "stock": 100},
-            {"sku_code": "TG500-BLUE", "specs": {"颜色": "星空蓝"}, "price_fen": 8900, "stock": 100},
-            {"sku_code": "TG500-WHITE", "specs": {"颜色": "珍珠白"}, "price_fen": 8900, "stock": 100},
+            {
+                "sku_code": "TG500-PINK",
+                "specs": {"颜色": "樱花粉"},
+                "price_fen": 8900,
+                "stock": 100,
+            },
+            {
+                "sku_code": "TG500-BLUE",
+                "specs": {"颜色": "星空蓝"},
+                "price_fen": 8900,
+                "stock": 100,
+            },
+            {
+                "sku_code": "TG500-WHITE",
+                "specs": {"颜色": "珍珠白"},
+                "price_fen": 8900,
+                "stock": 100,
+            },
         ],
     },
     {
@@ -165,10 +253,30 @@ GOODS: list[GoodsSeed] = [
             "鞋垫可拆洗，清洁时建议冷水手洗并自然阴干。"
         ),
         "skus": [
-            {"sku_code": "CR3-BW-40", "specs": {"配色": "黑白", "尺码": "40"}, "price_fen": 19900, "stock": 30},
-            {"sku_code": "CR3-BW-41", "specs": {"配色": "黑白", "尺码": "41"}, "price_fen": 19900, "stock": 35},
-            {"sku_code": "CR3-BW-42", "specs": {"配色": "黑白", "尺码": "42"}, "price_fen": 19900, "stock": 35},
-            {"sku_code": "CR3-GRAY-42", "specs": {"配色": "雾灰", "尺码": "42"}, "price_fen": 20900, "stock": 20},
+            {
+                "sku_code": "CR3-BW-40",
+                "specs": {"配色": "黑白", "尺码": "40"},
+                "price_fen": 19900,
+                "stock": 30,
+            },
+            {
+                "sku_code": "CR3-BW-41",
+                "specs": {"配色": "黑白", "尺码": "41"},
+                "price_fen": 19900,
+                "stock": 35,
+            },
+            {
+                "sku_code": "CR3-BW-42",
+                "specs": {"配色": "黑白", "尺码": "42"},
+                "price_fen": 19900,
+                "stock": 35,
+            },
+            {
+                "sku_code": "CR3-GRAY-42",
+                "specs": {"配色": "雾灰", "尺码": "42"},
+                "price_fen": 20900,
+                "stock": 20,
+            },
         ],
     },
     {
@@ -183,10 +291,30 @@ GOODS: list[GoodsSeed] = [
             "避免长时间浸泡。尺码为宽松设计，喜欢合身效果可按平时尺码小一码选择。"
         ),
         "skus": [
-            {"sku_code": "UF-OLIVE-M", "specs": {"颜色": "橄榄绿", "尺码": "M"}, "price_fen": 16900, "stock": 35},
-            {"sku_code": "UF-OLIVE-L", "specs": {"颜色": "橄榄绿", "尺码": "L"}, "price_fen": 16900, "stock": 40},
-            {"sku_code": "UF-KHAKI-M", "specs": {"颜色": "浅卡其", "尺码": "M"}, "price_fen": 16900, "stock": 30},
-            {"sku_code": "UF-KHAKI-L", "specs": {"颜色": "浅卡其", "尺码": "L"}, "price_fen": 16900, "stock": 35},
+            {
+                "sku_code": "UF-OLIVE-M",
+                "specs": {"颜色": "橄榄绿", "尺码": "M"},
+                "price_fen": 16900,
+                "stock": 35,
+            },
+            {
+                "sku_code": "UF-OLIVE-L",
+                "specs": {"颜色": "橄榄绿", "尺码": "L"},
+                "price_fen": 16900,
+                "stock": 40,
+            },
+            {
+                "sku_code": "UF-KHAKI-M",
+                "specs": {"颜色": "浅卡其", "尺码": "M"},
+                "price_fen": 16900,
+                "stock": 30,
+            },
+            {
+                "sku_code": "UF-KHAKI-L",
+                "specs": {"颜色": "浅卡其", "尺码": "L"},
+                "price_fen": 16900,
+                "stock": 35,
+            },
         ],
     },
     {
@@ -201,8 +329,18 @@ GOODS: list[GoodsSeed] = [
             "开袋后建议一次食用完毕，并置于阴凉干燥处保存。"
         ),
         "skus": [
-            {"sku_code": "NUTS-20", "specs": {"规格": "25g×20 袋"}, "price_fen": 9900, "stock": 160},
-            {"sku_code": "NUTS-30", "specs": {"规格": "25g×30 袋"}, "price_fen": 13900, "stock": 120},
+            {
+                "sku_code": "NUTS-20",
+                "specs": {"规格": "25g×20 袋"},
+                "price_fen": 9900,
+                "stock": 160,
+            },
+            {
+                "sku_code": "NUTS-30",
+                "specs": {"规格": "25g×30 袋"},
+                "price_fen": 13900,
+                "stock": 120,
+            },
         ],
     },
     {
@@ -217,10 +355,30 @@ GOODS: list[GoodsSeed] = [
             "建议使用洗衣袋轻柔机洗或冷水手洗，平铺晾干，避免高温烘干导致织物变形。"
         ),
         "skus": [
-            {"sku_code": "SL-CARD-OAT-S", "specs": {"颜色": "燕麦色", "尺码": "S"}, "price_fen": 18900, "stock": 28},
-            {"sku_code": "SL-CARD-OAT-M", "specs": {"颜色": "燕麦色", "尺码": "M"}, "price_fen": 18900, "stock": 36},
-            {"sku_code": "SL-CARD-GRAY-S", "specs": {"颜色": "烟灰色", "尺码": "S"}, "price_fen": 19900, "stock": 24},
-            {"sku_code": "SL-CARD-GRAY-M", "specs": {"颜色": "烟灰色", "尺码": "M"}, "price_fen": 19900, "stock": 32},
+            {
+                "sku_code": "SL-CARD-OAT-S",
+                "specs": {"颜色": "燕麦色", "尺码": "S"},
+                "price_fen": 18900,
+                "stock": 28,
+            },
+            {
+                "sku_code": "SL-CARD-OAT-M",
+                "specs": {"颜色": "燕麦色", "尺码": "M"},
+                "price_fen": 18900,
+                "stock": 36,
+            },
+            {
+                "sku_code": "SL-CARD-GRAY-S",
+                "specs": {"颜色": "烟灰色", "尺码": "S"},
+                "price_fen": 19900,
+                "stock": 24,
+            },
+            {
+                "sku_code": "SL-CARD-GRAY-M",
+                "specs": {"颜色": "烟灰色", "尺码": "M"},
+                "price_fen": 19900,
+                "stock": 32,
+            },
         ],
     },
     {
@@ -235,9 +393,24 @@ GOODS: list[GoodsSeed] = [
             "建议在平整坚实地面使用，并在每次展开后确认所有连接点已经完全就位。"
         ),
         "skus": [
-            {"sku_code": "TS-CHAIR-KHAKI", "specs": {"颜色": "沙丘卡其"}, "price_fen": 15900, "stock": 55},
-            {"sku_code": "TS-CHAIR-GREEN", "specs": {"颜色": "森林绿"}, "price_fen": 15900, "stock": 50},
-            {"sku_code": "TS-CHAIR-BLACK", "specs": {"颜色": "曜石黑"}, "price_fen": 16900, "stock": 45},
+            {
+                "sku_code": "TS-CHAIR-KHAKI",
+                "specs": {"颜色": "沙丘卡其"},
+                "price_fen": 15900,
+                "stock": 55,
+            },
+            {
+                "sku_code": "TS-CHAIR-GREEN",
+                "specs": {"颜色": "森林绿"},
+                "price_fen": 15900,
+                "stock": 50,
+            },
+            {
+                "sku_code": "TS-CHAIR-BLACK",
+                "specs": {"颜色": "曜石黑"},
+                "price_fen": 16900,
+                "stock": 45,
+            },
         ],
     },
     {
@@ -252,9 +425,24 @@ GOODS: list[GoodsSeed] = [
             "适合城市通勤、短途出行与周末轻户外，不建议长时间暴露于大雨环境。"
         ),
         "skus": [
-            {"sku_code": "CT22-GRAY", "specs": {"颜色": "石墨灰"}, "price_fen": 22900, "stock": 65},
-            {"sku_code": "CT22-BLACK", "specs": {"颜色": "曜石黑"}, "price_fen": 22900, "stock": 70},
-            {"sku_code": "CT22-GREEN", "specs": {"颜色": "松针绿"}, "price_fen": 23900, "stock": 45},
+            {
+                "sku_code": "CT22-GRAY",
+                "specs": {"颜色": "石墨灰"},
+                "price_fen": 22900,
+                "stock": 65,
+            },
+            {
+                "sku_code": "CT22-BLACK",
+                "specs": {"颜色": "曜石黑"},
+                "price_fen": 22900,
+                "stock": 70,
+            },
+            {
+                "sku_code": "CT22-GREEN",
+                "specs": {"颜色": "松针绿"},
+                "price_fen": 23900,
+                "stock": 45,
+            },
         ],
     },
     {
@@ -269,8 +457,18 @@ GOODS: list[GoodsSeed] = [
             "产品采用 USB-C 供电，建议搭配符合规格的正规电源适配器使用；长时间阅读仍应注意环境整体照明与用眼休息。"
         ),
         "skus": [
-            {"sku_code": "HDP-WHITE", "specs": {"颜色": "暖白"}, "price_fen": 21900, "stock": 80},
-            {"sku_code": "HDP-GRAY", "specs": {"颜色": "深空灰"}, "price_fen": 22900, "stock": 70},
+            {
+                "sku_code": "HDP-WHITE",
+                "specs": {"颜色": "暖白"},
+                "price_fen": 21900,
+                "stock": 80,
+            },
+            {
+                "sku_code": "HDP-GRAY",
+                "specs": {"颜色": "深空灰"},
+                "price_fen": 22900,
+                "stock": 70,
+            },
         ],
     },
 ]
@@ -278,26 +476,410 @@ GOODS: list[GoodsSeed] = [
 # 本轮新增的 20 个商品。图片均由 KiVault 公共图床托管，便于演示环境直接访问。
 GOODS.extend(
     [
-        {"slug": "garment-steamer", "category": "家居日用", "name": "SteamGo 便携手持挂烫机 旅行小型除皱", "fallback_image": "/mall/goods-1.svg", "original_price_fen": 21900, "detail": "轻巧手持设计，预热后可用于衬衫、针织物等日常衣物的快速除皱。可拆卸水箱便于补水，旅行和宿舍收纳更省空间。使用时请保持衣物平整，并避开不耐高温面料。", "skus": [{"sku_code": "SG-CREAM", "specs": {"颜色": "奶油白"}, "price_fen": 15900, "stock": 68}, {"sku_code": "SG-GRAY", "specs": {"颜色": "雾灰"}, "price_fen": 15900, "stock": 56}]},
-        {"slug": "open-ear-earbuds", "category": "手机通讯", "name": "OpenBeat 开放式运动蓝牙耳机 低延迟长续航", "fallback_image": "/mall/goods-2.svg", "original_price_fen": 45900, "detail": "开放式耳挂结构让双耳保持环境感知，适合通勤、骑行与轻运动。定向声学单元配合双麦通话降噪，充电盒可提供额外续航。日常防汗防泼溅，运动后请擦干再收纳。", "skus": [{"sku_code": "OB-BLACK", "specs": {"颜色": "曜石黑"}, "price_fen": 32900, "stock": 72}, {"sku_code": "OB-BEIGE", "specs": {"颜色": "沙岩米"}, "price_fen": 33900, "stock": 45}]},
-        {"slug": "magnetic-power-bank", "category": "手机通讯", "name": "MagCharge 10000mAh 磁吸无线充电宝 轻薄快充", "fallback_image": "/mall/goods-3.svg", "original_price_fen": 26900, "detail": "10000mAh 容量的轻薄磁吸充电宝，可为兼容设备提供无线充电，也支持 USB-C 有线输出。磨砂铝合金外壳耐日常刮擦，出行前建议为本品充满电。实际可用容量受设备与使用环境影响。", "skus": [{"sku_code": "MC-NAVY", "specs": {"颜色": "深海蓝"}, "price_fen": 19900, "stock": 88}, {"sku_code": "MC-SILVER", "specs": {"颜色": "银灰"}, "price_fen": 19900, "stock": 75}]},
-        {"slug": "usb-c-hub", "category": "电脑办公", "name": "DockMini 7 合 1 USB-C 扩展坞 HDMI 读卡器", "fallback_image": "/mall/goods-4.svg", "original_price_fen": 19900, "detail": "为 USB-C 设备扩展 HDMI、USB-A、USB-C 与 SD/microSD 读卡接口的小型扩展坞。铝合金机身便于携带，适合会议投屏和移动办公。请确认设备 USB-C 接口支持所需的视频输出协议。", "skus": [{"sku_code": "DM-GRAY", "specs": {"颜色": "深空灰"}, "price_fen": 13900, "stock": 96}]},
-        {"slug": "scented-candle", "category": "家居日用", "name": "暮木香氛蜡烛 180g 岩兰草檀木调", "fallback_image": "/mall/goods-1.svg", "original_price_fen": 15900, "detail": "温暖木质香调香氛蜡烛，陶瓷杯搭配防尘盖，适合卧室、书房与休闲时刻。首次点燃建议使表层蜡充分融化以获得更均匀的燃烧效果。请置于平稳耐热表面并远离儿童和可燃物。", "skus": [{"sku_code": "CANDLE-SANDAL", "specs": {"香型": "岩兰草檀木"}, "price_fen": 10900, "stock": 110}, {"sku_code": "CANDLE-FIG", "specs": {"香型": "无花果绿叶"}, "price_fen": 10900, "stock": 90}]},
-        {"slug": "lunch-tote", "category": "家居日用", "name": "FreshDay 加厚保温午餐包 大容量便携饭盒袋", "fallback_image": "/mall/goods-2.svg", "original_price_fen": 9900, "detail": "加厚保温层搭配拉链主仓，可容纳常见饭盒、水果与饮品。外层耐磨易清洁，双提手携带轻松。保温效果受环境与装入食物温度影响，建议与冰袋或保温容器搭配使用。", "skus": [{"sku_code": "FD-SAGE", "specs": {"颜色": "鼠尾草绿"}, "price_fen": 6900, "stock": 150}, {"sku_code": "FD-BEIGE", "specs": {"颜色": "燕麦米"}, "price_fen": 6900, "stock": 130}]},
-        {"slug": "travel-umbrella", "category": "户外装备", "name": "WindLite 轻量折叠晴雨伞 防晒防泼水", "fallback_image": "/mall/goods-3.svg", "original_price_fen": 8900, "detail": "轻量三折伞骨结合防泼水伞布，折叠后可放入通勤包侧袋。伞面提供日常遮阳与挡雨能力，遇强风天气请注意使用安全。收伞后建议晾干再放入收纳套。", "skus": [{"sku_code": "WL-BLACK", "specs": {"颜色": "曜石黑"}, "price_fen": 5900, "stock": 180}, {"sku_code": "WL-BLUE", "specs": {"颜色": "雾蓝"}, "price_fen": 5900, "stock": 140}]},
-        {"slug": "coffee-grinder", "category": "家居日用", "name": "GrindCraft 手摇咖啡磨豆机 陶瓷芯可调粗细", "fallback_image": "/mall/goods-4.svg", "original_price_fen": 18900, "detail": "不锈钢机身与木质握柄兼具耐用和手感，陶瓷磨芯支持调节研磨粗细，适合手冲、法压等日常冲煮方式。首次使用前请清洁研磨仓，研磨后保持干燥避免水洗磨芯。", "skus": [{"sku_code": "GC-WALNUT", "specs": {"木纹": "胡桃木色"}, "price_fen": 12900, "stock": 64}]},
-        {"slug": "knit-throw", "category": "家居日用", "name": "CozyWeave 针织盖毯 130×170cm 柔软保暖", "fallback_image": "/mall/goods-1.svg", "original_price_fen": 19900, "detail": "细密罗纹针织毯，适合沙发午休、空调房与居家阅读。柔软混纺面料有自然垂坠感，简约色调便于融入不同家居风格。建议冷水轻柔洗涤并平铺晾干。", "skus": [{"sku_code": "CW-OAT", "specs": {"颜色": "燕麦色"}, "price_fen": 14900, "stock": 80}, {"sku_code": "CW-GRAY", "specs": {"颜色": "烟灰色"}, "price_fen": 14900, "stock": 70}]},
-        {"slug": "crossbody-bag", "category": "女装", "name": "Mellow 半月斜挎包 轻量通勤小方包", "fallback_image": "/mall/goods-2.svg", "original_price_fen": 23900, "detail": "半月轮廓的小巧斜挎包，采用细腻纹理面料与可调节肩带，容纳手机、卡包、钥匙等出门随身物品。内置分隔袋方便收纳，日常清洁请使用微湿软布轻擦。", "skus": [{"sku_code": "MELLOW-NAVY", "specs": {"颜色": "海军蓝"}, "price_fen": 16900, "stock": 76}, {"sku_code": "MELLOW-BROWN", "specs": {"颜色": "焦糖棕"}, "price_fen": 16900, "stock": 66}]},
-        {"slug": "cotton-tshirt", "category": "男装", "name": "Everyday 260g 男士重磅纯棉短袖 T 恤", "fallback_image": "/mall/goods-3.svg", "original_price_fen": 12900, "detail": "260g 纯棉面料打造挺括基础版型，圆领与落肩剪裁便于单穿或作内搭。无夸张图案，适合日常通勤与休闲搭配。建议反面冷水洗涤，深浅色分开，避免高温烘干。", "skus": [{"sku_code": "ED-CHARCOAL-M", "specs": {"颜色": "炭灰", "尺码": "M"}, "price_fen": 8900, "stock": 90}, {"sku_code": "ED-CHARCOAL-L", "specs": {"颜色": "炭灰", "尺码": "L"}, "price_fen": 8900, "stock": 100}, {"sku_code": "ED-WHITE-L", "specs": {"颜色": "暖白", "尺码": "L"}, "price_fen": 8900, "stock": 85}]},
-        {"slug": "yoga-leggings", "category": "女装", "name": "FlexMove 女士高腰瑜伽裤 弹力速干运动紧身裤", "fallback_image": "/mall/goods-4.svg", "original_price_fen": 17900, "detail": "高腰包裹与四面弹力面料兼顾日常训练的舒适度和活动自由度，面料具备速干特性。适合瑜伽、普拉提和轻度健身，建议使用洗衣袋冷水清洗，不与粗糙衣物混洗。", "skus": [{"sku_code": "FM-PLUM-S", "specs": {"颜色": "梅子紫", "尺码": "S"}, "price_fen": 12900, "stock": 65}, {"sku_code": "FM-PLUM-M", "specs": {"颜色": "梅子紫", "尺码": "M"}, "price_fen": 12900, "stock": 75}]},
-        {"slug": "sports-bottle", "category": "户外装备", "name": "HydraLoop 750ml 运动水壶 防漏提环设计", "fallback_image": "/mall/goods-1.svg", "original_price_fen": 7900, "detail": "750ml 大容量运动水壶，旋盖配合硅胶密封圈降低漏水风险，提环方便跑步、徒步和健身携带。宽口便于清洗与放入冰块。首次使用前请充分清洗，不建议盛装高温液体。", "skus": [{"sku_code": "HL-ORANGE", "specs": {"颜色": "活力橙"}, "price_fen": 4900, "stock": 160}, {"sku_code": "HL-TEAL", "specs": {"颜色": "湖水绿"}, "price_fen": 4900, "stock": 140}]},
-        {"slug": "foam-roller", "category": "户外装备", "name": "RecoverPro 按摩泡沫轴 33cm 深层放松筋膜", "fallback_image": "/mall/goods-2.svg", "original_price_fen": 10900, "detail": "高密度泡沫材质配合分区纹理，可用于运动前热身和运动后肌肉放松。33cm 长度方便收纳携带，适合腿部、背部等大肌群的自我按摩。请根据自身承受能力循序渐进使用。", "skus": [{"sku_code": "RP-TEAL", "specs": {"颜色": "深青绿"}, "price_fen": 7900, "stock": 98}]},
-        {"slug": "bluetooth-speaker", "category": "手机通讯", "name": "PocketSound 迷你蓝牙音箱 户外便携低音增强", "fallback_image": "/mall/goods-3.svg", "original_price_fen": 16900, "detail": "掌心大小的便携蓝牙音箱，织物网罩与圆角机身便于随身携带。支持蓝牙连接和日常防泼溅，可用于桌面听歌、野餐和轻户外场景。实际续航会随音量与内容变化。", "skus": [{"sku_code": "PS-CORAL", "specs": {"颜色": "珊瑚红"}, "price_fen": 11900, "stock": 82}, {"sku_code": "PS-BLUE", "specs": {"颜色": "海盐蓝"}, "price_fen": 11900, "stock": 74}]},
-        {"slug": "carry-on-suitcase", "category": "户外装备", "name": "TripShell 20 英寸登机拉杆箱 静音万向轮", "fallback_image": "/mall/goods-4.svg", "original_price_fen": 49900, "detail": "20 英寸硬壳登机箱，分区内里便于整理短途出行衣物，静音万向轮让移动更平稳。铝合金拉杆多档可调，密码锁使用前请阅读说明。不同航空公司的登机尺寸规定可能不同，请提前确认。", "skus": [{"sku_code": "TS-MUSTARD", "specs": {"颜色": "芥末黄"}, "price_fen": 35900, "stock": 42}, {"sku_code": "TS-BLACK", "specs": {"颜色": "曜石黑"}, "price_fen": 35900, "stock": 50}]},
-        {"slug": "lint-remover", "category": "家居日用", "name": "CedarCare 实木除毛球器 可重复使用衣物清洁刷", "fallback_image": "/mall/goods-1.svg", "original_price_fen": 6900, "detail": "雪松木手柄搭配金属网面，可清理针织衫、毛呢外套和沙发织物表面的浮毛与毛球。无需电池，可重复使用。建议先在衣物不显眼处测试，并以轻柔单向动作操作。", "skus": [{"sku_code": "CC-CEDAR", "specs": {"材质": "雪松木柄"}, "price_fen": 4500, "stock": 140}]},
-        {"slug": "ceramic-bowls", "category": "杯壶水具", "name": "日常白釉陶瓷面碗 2 只装 1100ml", "fallback_image": "/mall/goods-2.svg", "original_price_fen": 11900, "detail": "两只装大容量陶瓷面碗，细砂白釉外观简洁耐看，适合面食、沙拉和汤饭。加厚碗沿握持舒适，可用于日常餐桌。请避免骤冷骤热，清洗时轻拿轻放。", "skus": [{"sku_code": "BOWL-WHITE-2", "specs": {"规格": "1100ml×2"}, "price_fen": 7900, "stock": 120}]},
-        {"slug": "kitchen-towels", "category": "家居日用", "name": "BambooSoft 竹纤维厨房抹布 3 条装 吸水不易掉屑", "fallback_image": "/mall/goods-3.svg", "original_price_fen": 5900, "detail": "三色组合厨房抹布，竹纤维混纺织物吸水性好、触感柔软，可用于擦拭台面、餐具和日常清洁。建议首次使用前清洗，使用后及时晾干并定期更换。", "skus": [{"sku_code": "BS-NEUTRAL-3", "specs": {"颜色": "中性色 3 条装"}, "price_fen": 3900, "stock": 220}]},
-        {"slug": "precision-screwdriver", "category": "电脑办公", "name": "FixMate 精密螺丝刀套装 24 合 1 磁吸收纳盒", "fallback_image": "/mall/goods-4.svg", "original_price_fen": 13900, "detail": "24 合 1 精密螺丝刀套装，磁吸收纳盒内含常用批头与铝合金手柄，适合眼镜、小型数码设备和玩具的日常维护。拆装电子设备前请先断电，并确认操作不会影响保修。", "skus": [{"sku_code": "FM-24-GRAY", "specs": {"规格": "24 合 1"}, "price_fen": 9900, "stock": 105}]},
+        {
+            "slug": "garment-steamer",
+            "category": "家居日用",
+            "name": "SteamGo 便携手持挂烫机 旅行小型除皱",
+            "fallback_image": "/mall/goods-1.svg",
+            "original_price_fen": 21900,
+            "detail": "轻巧手持设计，预热后可用于衬衫、针织物等日常衣物的快速除皱。可拆卸水箱便于补水，旅行和宿舍收纳更省空间。使用时请保持衣物平整，并避开不耐高温面料。",
+            "skus": [
+                {
+                    "sku_code": "SG-CREAM",
+                    "specs": {"颜色": "奶油白"},
+                    "price_fen": 15900,
+                    "stock": 68,
+                },
+                {
+                    "sku_code": "SG-GRAY",
+                    "specs": {"颜色": "雾灰"},
+                    "price_fen": 15900,
+                    "stock": 56,
+                },
+            ],
+        },
+        {
+            "slug": "open-ear-earbuds",
+            "category": "手机通讯",
+            "name": "OpenBeat 开放式运动蓝牙耳机 低延迟长续航",
+            "fallback_image": "/mall/goods-2.svg",
+            "original_price_fen": 45900,
+            "detail": "开放式耳挂结构让双耳保持环境感知，适合通勤、骑行与轻运动。定向声学单元配合双麦通话降噪，充电盒可提供额外续航。日常防汗防泼溅，运动后请擦干再收纳。",
+            "skus": [
+                {
+                    "sku_code": "OB-BLACK",
+                    "specs": {"颜色": "曜石黑"},
+                    "price_fen": 32900,
+                    "stock": 72,
+                },
+                {
+                    "sku_code": "OB-BEIGE",
+                    "specs": {"颜色": "沙岩米"},
+                    "price_fen": 33900,
+                    "stock": 45,
+                },
+            ],
+        },
+        {
+            "slug": "magnetic-power-bank",
+            "category": "手机通讯",
+            "name": "MagCharge 10000mAh 磁吸无线充电宝 轻薄快充",
+            "fallback_image": "/mall/goods-3.svg",
+            "original_price_fen": 26900,
+            "detail": "10000mAh 容量的轻薄磁吸充电宝，可为兼容设备提供无线充电，也支持 USB-C 有线输出。磨砂铝合金外壳耐日常刮擦，出行前建议为本品充满电。实际可用容量受设备与使用环境影响。",
+            "skus": [
+                {
+                    "sku_code": "MC-NAVY",
+                    "specs": {"颜色": "深海蓝"},
+                    "price_fen": 19900,
+                    "stock": 88,
+                },
+                {
+                    "sku_code": "MC-SILVER",
+                    "specs": {"颜色": "银灰"},
+                    "price_fen": 19900,
+                    "stock": 75,
+                },
+            ],
+        },
+        {
+            "slug": "usb-c-hub",
+            "category": "电脑办公",
+            "name": "DockMini 7 合 1 USB-C 扩展坞 HDMI 读卡器",
+            "fallback_image": "/mall/goods-4.svg",
+            "original_price_fen": 19900,
+            "detail": "为 USB-C 设备扩展 HDMI、USB-A、USB-C 与 SD/microSD 读卡接口的小型扩展坞。铝合金机身便于携带，适合会议投屏和移动办公。请确认设备 USB-C 接口支持所需的视频输出协议。",
+            "skus": [
+                {
+                    "sku_code": "DM-GRAY",
+                    "specs": {"颜色": "深空灰"},
+                    "price_fen": 13900,
+                    "stock": 96,
+                }
+            ],
+        },
+        {
+            "slug": "scented-candle",
+            "category": "家居日用",
+            "name": "暮木香氛蜡烛 180g 岩兰草檀木调",
+            "fallback_image": "/mall/goods-1.svg",
+            "original_price_fen": 15900,
+            "detail": "温暖木质香调香氛蜡烛，陶瓷杯搭配防尘盖，适合卧室、书房与休闲时刻。首次点燃建议使表层蜡充分融化以获得更均匀的燃烧效果。请置于平稳耐热表面并远离儿童和可燃物。",
+            "skus": [
+                {
+                    "sku_code": "CANDLE-SANDAL",
+                    "specs": {"香型": "岩兰草檀木"},
+                    "price_fen": 10900,
+                    "stock": 110,
+                },
+                {
+                    "sku_code": "CANDLE-FIG",
+                    "specs": {"香型": "无花果绿叶"},
+                    "price_fen": 10900,
+                    "stock": 90,
+                },
+            ],
+        },
+        {
+            "slug": "lunch-tote",
+            "category": "家居日用",
+            "name": "FreshDay 加厚保温午餐包 大容量便携饭盒袋",
+            "fallback_image": "/mall/goods-2.svg",
+            "original_price_fen": 9900,
+            "detail": "加厚保温层搭配拉链主仓，可容纳常见饭盒、水果与饮品。外层耐磨易清洁，双提手携带轻松。保温效果受环境与装入食物温度影响，建议与冰袋或保温容器搭配使用。",
+            "skus": [
+                {
+                    "sku_code": "FD-SAGE",
+                    "specs": {"颜色": "鼠尾草绿"},
+                    "price_fen": 6900,
+                    "stock": 150,
+                },
+                {
+                    "sku_code": "FD-BEIGE",
+                    "specs": {"颜色": "燕麦米"},
+                    "price_fen": 6900,
+                    "stock": 130,
+                },
+            ],
+        },
+        {
+            "slug": "travel-umbrella",
+            "category": "户外装备",
+            "name": "WindLite 轻量折叠晴雨伞 防晒防泼水",
+            "fallback_image": "/mall/goods-3.svg",
+            "original_price_fen": 8900,
+            "detail": "轻量三折伞骨结合防泼水伞布，折叠后可放入通勤包侧袋。伞面提供日常遮阳与挡雨能力，遇强风天气请注意使用安全。收伞后建议晾干再放入收纳套。",
+            "skus": [
+                {
+                    "sku_code": "WL-BLACK",
+                    "specs": {"颜色": "曜石黑"},
+                    "price_fen": 5900,
+                    "stock": 180,
+                },
+                {
+                    "sku_code": "WL-BLUE",
+                    "specs": {"颜色": "雾蓝"},
+                    "price_fen": 5900,
+                    "stock": 140,
+                },
+            ],
+        },
+        {
+            "slug": "coffee-grinder",
+            "category": "家居日用",
+            "name": "GrindCraft 手摇咖啡磨豆机 陶瓷芯可调粗细",
+            "fallback_image": "/mall/goods-4.svg",
+            "original_price_fen": 18900,
+            "detail": "不锈钢机身与木质握柄兼具耐用和手感，陶瓷磨芯支持调节研磨粗细，适合手冲、法压等日常冲煮方式。首次使用前请清洁研磨仓，研磨后保持干燥避免水洗磨芯。",
+            "skus": [
+                {
+                    "sku_code": "GC-WALNUT",
+                    "specs": {"木纹": "胡桃木色"},
+                    "price_fen": 12900,
+                    "stock": 64,
+                }
+            ],
+        },
+        {
+            "slug": "knit-throw",
+            "category": "家居日用",
+            "name": "CozyWeave 针织盖毯 130×170cm 柔软保暖",
+            "fallback_image": "/mall/goods-1.svg",
+            "original_price_fen": 19900,
+            "detail": "细密罗纹针织毯，适合沙发午休、空调房与居家阅读。柔软混纺面料有自然垂坠感，简约色调便于融入不同家居风格。建议冷水轻柔洗涤并平铺晾干。",
+            "skus": [
+                {
+                    "sku_code": "CW-OAT",
+                    "specs": {"颜色": "燕麦色"},
+                    "price_fen": 14900,
+                    "stock": 80,
+                },
+                {
+                    "sku_code": "CW-GRAY",
+                    "specs": {"颜色": "烟灰色"},
+                    "price_fen": 14900,
+                    "stock": 70,
+                },
+            ],
+        },
+        {
+            "slug": "crossbody-bag",
+            "category": "女装",
+            "name": "Mellow 半月斜挎包 轻量通勤小方包",
+            "fallback_image": "/mall/goods-2.svg",
+            "original_price_fen": 23900,
+            "detail": "半月轮廓的小巧斜挎包，采用细腻纹理面料与可调节肩带，容纳手机、卡包、钥匙等出门随身物品。内置分隔袋方便收纳，日常清洁请使用微湿软布轻擦。",
+            "skus": [
+                {
+                    "sku_code": "MELLOW-NAVY",
+                    "specs": {"颜色": "海军蓝"},
+                    "price_fen": 16900,
+                    "stock": 76,
+                },
+                {
+                    "sku_code": "MELLOW-BROWN",
+                    "specs": {"颜色": "焦糖棕"},
+                    "price_fen": 16900,
+                    "stock": 66,
+                },
+            ],
+        },
+        {
+            "slug": "cotton-tshirt",
+            "category": "男装",
+            "name": "Everyday 260g 男士重磅纯棉短袖 T 恤",
+            "fallback_image": "/mall/goods-3.svg",
+            "original_price_fen": 12900,
+            "detail": "260g 纯棉面料打造挺括基础版型，圆领与落肩剪裁便于单穿或作内搭。无夸张图案，适合日常通勤与休闲搭配。建议反面冷水洗涤，深浅色分开，避免高温烘干。",
+            "skus": [
+                {
+                    "sku_code": "ED-CHARCOAL-M",
+                    "specs": {"颜色": "炭灰", "尺码": "M"},
+                    "price_fen": 8900,
+                    "stock": 90,
+                },
+                {
+                    "sku_code": "ED-CHARCOAL-L",
+                    "specs": {"颜色": "炭灰", "尺码": "L"},
+                    "price_fen": 8900,
+                    "stock": 100,
+                },
+                {
+                    "sku_code": "ED-WHITE-L",
+                    "specs": {"颜色": "暖白", "尺码": "L"},
+                    "price_fen": 8900,
+                    "stock": 85,
+                },
+            ],
+        },
+        {
+            "slug": "yoga-leggings",
+            "category": "女装",
+            "name": "FlexMove 女士高腰瑜伽裤 弹力速干运动紧身裤",
+            "fallback_image": "/mall/goods-4.svg",
+            "original_price_fen": 17900,
+            "detail": "高腰包裹与四面弹力面料兼顾日常训练的舒适度和活动自由度，面料具备速干特性。适合瑜伽、普拉提和轻度健身，建议使用洗衣袋冷水清洗，不与粗糙衣物混洗。",
+            "skus": [
+                {
+                    "sku_code": "FM-PLUM-S",
+                    "specs": {"颜色": "梅子紫", "尺码": "S"},
+                    "price_fen": 12900,
+                    "stock": 65,
+                },
+                {
+                    "sku_code": "FM-PLUM-M",
+                    "specs": {"颜色": "梅子紫", "尺码": "M"},
+                    "price_fen": 12900,
+                    "stock": 75,
+                },
+            ],
+        },
+        {
+            "slug": "sports-bottle",
+            "category": "户外装备",
+            "name": "HydraLoop 750ml 运动水壶 防漏提环设计",
+            "fallback_image": "/mall/goods-1.svg",
+            "original_price_fen": 7900,
+            "detail": "750ml 大容量运动水壶，旋盖配合硅胶密封圈降低漏水风险，提环方便跑步、徒步和健身携带。宽口便于清洗与放入冰块。首次使用前请充分清洗，不建议盛装高温液体。",
+            "skus": [
+                {
+                    "sku_code": "HL-ORANGE",
+                    "specs": {"颜色": "活力橙"},
+                    "price_fen": 4900,
+                    "stock": 160,
+                },
+                {
+                    "sku_code": "HL-TEAL",
+                    "specs": {"颜色": "湖水绿"},
+                    "price_fen": 4900,
+                    "stock": 140,
+                },
+            ],
+        },
+        {
+            "slug": "foam-roller",
+            "category": "户外装备",
+            "name": "RecoverPro 按摩泡沫轴 33cm 深层放松筋膜",
+            "fallback_image": "/mall/goods-2.svg",
+            "original_price_fen": 10900,
+            "detail": "高密度泡沫材质配合分区纹理，可用于运动前热身和运动后肌肉放松。33cm 长度方便收纳携带，适合腿部、背部等大肌群的自我按摩。请根据自身承受能力循序渐进使用。",
+            "skus": [
+                {
+                    "sku_code": "RP-TEAL",
+                    "specs": {"颜色": "深青绿"},
+                    "price_fen": 7900,
+                    "stock": 98,
+                }
+            ],
+        },
+        {
+            "slug": "bluetooth-speaker",
+            "category": "手机通讯",
+            "name": "PocketSound 迷你蓝牙音箱 户外便携低音增强",
+            "fallback_image": "/mall/goods-3.svg",
+            "original_price_fen": 16900,
+            "detail": "掌心大小的便携蓝牙音箱，织物网罩与圆角机身便于随身携带。支持蓝牙连接和日常防泼溅，可用于桌面听歌、野餐和轻户外场景。实际续航会随音量与内容变化。",
+            "skus": [
+                {
+                    "sku_code": "PS-CORAL",
+                    "specs": {"颜色": "珊瑚红"},
+                    "price_fen": 11900,
+                    "stock": 82,
+                },
+                {
+                    "sku_code": "PS-BLUE",
+                    "specs": {"颜色": "海盐蓝"},
+                    "price_fen": 11900,
+                    "stock": 74,
+                },
+            ],
+        },
+        {
+            "slug": "carry-on-suitcase",
+            "category": "户外装备",
+            "name": "TripShell 20 英寸登机拉杆箱 静音万向轮",
+            "fallback_image": "/mall/goods-4.svg",
+            "original_price_fen": 49900,
+            "detail": "20 英寸硬壳登机箱，分区内里便于整理短途出行衣物，静音万向轮让移动更平稳。铝合金拉杆多档可调，密码锁使用前请阅读说明。不同航空公司的登机尺寸规定可能不同，请提前确认。",
+            "skus": [
+                {
+                    "sku_code": "TS-MUSTARD",
+                    "specs": {"颜色": "芥末黄"},
+                    "price_fen": 35900,
+                    "stock": 42,
+                },
+                {
+                    "sku_code": "TS-BLACK",
+                    "specs": {"颜色": "曜石黑"},
+                    "price_fen": 35900,
+                    "stock": 50,
+                },
+            ],
+        },
+        {
+            "slug": "lint-remover",
+            "category": "家居日用",
+            "name": "CedarCare 实木除毛球器 可重复使用衣物清洁刷",
+            "fallback_image": "/mall/goods-1.svg",
+            "original_price_fen": 6900,
+            "detail": "雪松木手柄搭配金属网面，可清理针织衫、毛呢外套和沙发织物表面的浮毛与毛球。无需电池，可重复使用。建议先在衣物不显眼处测试，并以轻柔单向动作操作。",
+            "skus": [
+                {
+                    "sku_code": "CC-CEDAR",
+                    "specs": {"材质": "雪松木柄"},
+                    "price_fen": 4500,
+                    "stock": 140,
+                }
+            ],
+        },
+        {
+            "slug": "ceramic-bowls",
+            "category": "杯壶水具",
+            "name": "日常白釉陶瓷面碗 2 只装 1100ml",
+            "fallback_image": "/mall/goods-2.svg",
+            "original_price_fen": 11900,
+            "detail": "两只装大容量陶瓷面碗，细砂白釉外观简洁耐看，适合面食、沙拉和汤饭。加厚碗沿握持舒适，可用于日常餐桌。请避免骤冷骤热，清洗时轻拿轻放。",
+            "skus": [
+                {
+                    "sku_code": "BOWL-WHITE-2",
+                    "specs": {"规格": "1100ml×2"},
+                    "price_fen": 7900,
+                    "stock": 120,
+                }
+            ],
+        },
+        {
+            "slug": "kitchen-towels",
+            "category": "家居日用",
+            "name": "BambooSoft 竹纤维厨房抹布 3 条装 吸水不易掉屑",
+            "fallback_image": "/mall/goods-3.svg",
+            "original_price_fen": 5900,
+            "detail": "三色组合厨房抹布，竹纤维混纺织物吸水性好、触感柔软，可用于擦拭台面、餐具和日常清洁。建议首次使用前清洗，使用后及时晾干并定期更换。",
+            "skus": [
+                {
+                    "sku_code": "BS-NEUTRAL-3",
+                    "specs": {"颜色": "中性色 3 条装"},
+                    "price_fen": 3900,
+                    "stock": 220,
+                }
+            ],
+        },
+        {
+            "slug": "precision-screwdriver",
+            "category": "电脑办公",
+            "name": "FixMate 精密螺丝刀套装 24 合 1 磁吸收纳盒",
+            "fallback_image": "/mall/goods-4.svg",
+            "original_price_fen": 13900,
+            "detail": "24 合 1 精密螺丝刀套装，磁吸收纳盒内含常用批头与铝合金手柄，适合眼镜、小型数码设备和玩具的日常维护。拆装电子设备前请先断电，并确认操作不会影响保修。",
+            "skus": [
+                {
+                    "sku_code": "FM-24-GRAY",
+                    "specs": {"规格": "24 合 1"},
+                    "price_fen": 9900,
+                    "stock": 105,
+                }
+            ],
+        },
     ]
 )
 
@@ -321,6 +903,255 @@ BUYER_USERNAME = "buyer"
 BUYER_PASSWORD = "buyer123"
 BUYER_EMAIL = "buyer@example.com"
 BUYER_PHONE = "13800000002"
+
+INFORMATION_POSTS: list[InformationSeed] = [
+    {
+        "title": "杭州本地餐饮小程序开发，支持点餐、会员和配送",
+        "category": "mini_program",
+        "price": "项目报价 8,000 元起",
+        "content": "承接餐饮门店小程序定制，包含在线点餐、桌码下单、会员积分、优惠券和配送对接。可先梳理门店流程，再提供原型和阶段性交付计划。",
+        "contact_name": "陈工",
+        "contact_phone": "13800000001",
+        "attributes": {
+            "dev_method": "原生开发",
+            "secondary_dev": "是",
+            "industry": "餐饮零售",
+            "language": "TypeScript",
+            "database": "MySQL",
+        },
+        "poster": SELLER_USERNAME,
+        "status": InformationStatus.APPROVED,
+        "is_top": True,
+        "view_count": 326,
+        "age_days": 1,
+        "reject_reason": None,
+    },
+    {
+        "title": "预约报名小程序模板，可按行业二次开发",
+        "category": "mini_program",
+        "price": "2,999 元起",
+        "content": "适用于活动报名、课程预约和场地预约的轻量小程序方案。提供后台管理、名额控制、通知提醒和数据导出，可根据品牌视觉和业务规则进行二次开发。",
+        "contact_name": "林先生",
+        "contact_phone": "13800000003",
+        "attributes": {
+            "dev_method": "模板开发",
+            "secondary_dev": "是",
+            "industry": "教育培训",
+            "language": "JavaScript",
+            "database": "PostgreSQL",
+        },
+        "poster": SELLER2_USERNAME,
+        "status": InformationStatus.APPROVED,
+        "is_top": False,
+        "view_count": 187,
+        "age_days": 3,
+        "reject_reason": None,
+    },
+    {
+        "title": "企业展示小程序开发，适合品牌宣传与获客",
+        "category": "mini_program",
+        "price": "面议",
+        "content": "为中小企业提供品牌展示、产品目录、表单留资和地图导航等小程序开发服务。支持根据现有官网内容迁移，交付后提供基础使用说明。",
+        "contact_name": "周女士",
+        "contact_phone": "13800000004",
+        "attributes": {
+            "dev_method": "混合开发",
+            "secondary_dev": "否",
+            "industry": "企业服务",
+            "language": "Vue",
+            "database": "MySQL",
+        },
+        "poster": SELLER3_USERNAME,
+        "status": InformationStatus.APPROVED,
+        "is_top": False,
+        "view_count": 96,
+        "age_days": 6,
+        "reject_reason": None,
+    },
+    {
+        "title": "跨平台健身打卡 APP 定制开发",
+        "category": "app",
+        "price": "20,000 元起",
+        "content": "提供训练计划、课程内容、运动打卡、数据统计与会员订阅等功能的 APP 定制开发。支持从产品原型、UI 设计到应用上架的一站式协作。",
+        "contact_name": "陈工",
+        "contact_phone": "13800000001",
+        "attributes": {
+            "dev_method": "混合开发",
+            "secondary_dev": "是",
+            "platform": "跨平台",
+            "industry": "运动健康",
+            "language": "Flutter",
+        },
+        "poster": SELLER_USERNAME,
+        "status": InformationStatus.APPROVED,
+        "is_top": True,
+        "view_count": 241,
+        "age_days": 2,
+        "reject_reason": None,
+    },
+    {
+        "title": "Android / iOS 上门家政预约 APP 开发",
+        "category": "app",
+        "price": "按功能模块报价",
+        "content": "面向家政服务团队提供用户下单、服务人员排班、订单跟踪、评价与后台运营功能。可对接短信、支付和地图服务，适合已有线下团队的数字化升级。",
+        "contact_name": "林先生",
+        "contact_phone": "13800000003",
+        "attributes": {
+            "dev_method": "原生开发",
+            "secondary_dev": "否",
+            "platform": "Android",
+            "industry": "生活服务",
+            "language": "Kotlin",
+        },
+        "poster": SELLER2_USERNAME,
+        "status": InformationStatus.APPROVED,
+        "is_top": False,
+        "view_count": 154,
+        "age_days": 5,
+        "reject_reason": None,
+    },
+    {
+        "title": "企业内部审批与报销 APP 方案咨询",
+        "category": "app",
+        "price": "免费初步评估",
+        "content": "可为企业梳理移动审批、费用报销、公告与通讯录等需求，并给出功能优先级和实施建议。适合计划建设内部移动办公工具的团队。",
+        "contact_name": "示例买家",
+        "contact_phone": "13800000002",
+        "attributes": {
+            "dev_method": "混合开发",
+            "secondary_dev": "是",
+            "platform": "跨平台",
+            "industry": "企业服务",
+            "language": "React Native",
+        },
+        "poster": BUYER_USERNAME,
+        "status": InformationStatus.PENDING,
+        "is_top": False,
+        "view_count": 0,
+        "age_days": 0,
+        "reject_reason": None,
+    },
+    {
+        "title": "库存进销存管理软件，支持多仓库与权限配置",
+        "category": "software",
+        "price": "6,800 元起",
+        "content": "提供采购、销售、库存盘点、调拨、报表和角色权限等进销存功能。支持按实际业务流程定制字段和单据，适用于商贸及小型仓储团队。",
+        "contact_name": "周女士",
+        "contact_phone": "13800000004",
+        "attributes": {
+            "language": "Python",
+            "platform": "Web",
+            "deliverable": "定制开发",
+            "function": "采购销售、库存预警、盘点报表和权限管理",
+        },
+        "poster": SELLER3_USERNAME,
+        "status": InformationStatus.APPROVED,
+        "is_top": False,
+        "view_count": 278,
+        "age_days": 4,
+        "reject_reason": None,
+    },
+    {
+        "title": "实验室预约排班系统，可私有化部署",
+        "category": "software",
+        "price": "12,000 元起",
+        "content": "面向实验室和共享设备管理场景，支持设备预约、时间冲突校验、管理员审核、使用记录和统计导出。可部署在单位内网环境。",
+        "contact_name": "陈工",
+        "contact_phone": "13800000001",
+        "attributes": {
+            "language": "Java",
+            "platform": "Linux",
+            "deliverable": "源码",
+            "function": "设备预约、审批、排班、使用记录和数据导出",
+        },
+        "poster": SELLER_USERNAME,
+        "status": InformationStatus.APPROVED,
+        "is_top": False,
+        "view_count": 132,
+        "age_days": 8,
+        "reject_reason": None,
+    },
+    {
+        "title": "旧版桌面工具迁移 Web 管理后台服务",
+        "category": "software",
+        "price": "面议",
+        "content": "帮助将旧桌面管理工具迁移为浏览器可访问的后台系统，覆盖账号权限、数据导入导出与常用报表。可先进行现有系统评估。",
+        "contact_name": "示例买家",
+        "contact_phone": "13800000002",
+        "attributes": {
+            "language": "TypeScript",
+            "platform": "Web",
+            "deliverable": "定制开发",
+            "function": "旧系统评估、数据迁移和后台重构",
+        },
+        "poster": BUYER_USERNAME,
+        "status": InformationStatus.REJECTED,
+        "is_top": False,
+        "view_count": 0,
+        "age_days": 7,
+        "reject_reason": "请补充可验证的服务范围和交付说明后重新提交。",
+    },
+    {
+        "title": "响应式企业官网建设，含后台内容管理",
+        "category": "website",
+        "price": "3,500 元起",
+        "content": "为企业建设适配手机和电脑端的品牌官网，包含首页、产品服务、案例、新闻和联系页面，以及便于日常更新的内容管理后台。",
+        "contact_name": "林先生",
+        "contact_phone": "13800000003",
+        "attributes": {
+            "site_type": "企业官网",
+            "responsive": "是",
+            "backend": "Django",
+            "deliverable": "源码",
+        },
+        "poster": SELLER2_USERNAME,
+        "status": InformationStatus.APPROVED,
+        "is_top": True,
+        "view_count": 419,
+        "age_days": 1,
+        "reject_reason": None,
+    },
+    {
+        "title": "品牌活动营销落地页设计与开发",
+        "category": "website",
+        "price": "1,500 元起",
+        "content": "提供活动专题和营销落地页的视觉设计与前端开发，注重移动端浏览体验和表单转化路径。支持接入统计工具及线索收集邮箱。",
+        "contact_name": "周女士",
+        "contact_phone": "13800000004",
+        "attributes": {
+            "site_type": "营销落地页",
+            "responsive": "是",
+            "backend": "无",
+            "deliverable": "成品",
+        },
+        "poster": SELLER3_USERNAME,
+        "status": InformationStatus.APPROVED,
+        "is_top": False,
+        "view_count": 205,
+        "age_days": 3,
+        "reject_reason": None,
+    },
+    {
+        "title": "社区门户网站建设与栏目改版咨询",
+        "category": "website",
+        "price": "预约沟通",
+        "content": "提供社区、协会和园区门户网站的信息架构梳理、栏目改版和内容迁移咨询服务，可根据实际运营人员规模规划后台管理方式。",
+        "contact_name": "示例买家",
+        "contact_phone": "13800000002",
+        "attributes": {
+            "site_type": "门户网站",
+            "responsive": "是",
+            "backend": "Node.js",
+            "deliverable": "定制开发",
+        },
+        "poster": BUYER_USERNAME,
+        "status": InformationStatus.REJECTED,
+        "is_top": False,
+        "view_count": 0,
+        "age_days": 9,
+        "reject_reason": "标题包含不明确的推广描述，请明确具体服务内容后提交。",
+    },
+]
 
 # 演示店铺配置：每个店铺由独立卖家账号持有（后端约束「一用户一家店」）。
 # category 字段对应 GOODS 中每个商品的 item["category"]，用于把商品分配到各店铺。
@@ -355,38 +1186,84 @@ SHOPS: list[dict] = [
 ]
 
 ASSET_URLS: dict[str, list[str]] = {
-    "mechanical-keyboard": ["https://fstc.kispace.cn/i/1e33eb265a170d578076da3fe80411b1.webp"],
-    "running-shoes": ["https://fstc.kispace.cn/i/0c3381c8bd4fb92c86140e52914f3cff.webp"],
+    "mechanical-keyboard": [
+        "https://fstc.kispace.cn/i/1e33eb265a170d578076da3fe80411b1.webp"
+    ],
+    "running-shoes": [
+        "https://fstc.kispace.cn/i/0c3381c8bd4fb92c86140e52914f3cff.webp"
+    ],
     "mixed-nuts": ["https://fstc.kispace.cn/i/048da7cfa11df26648773a77a07e86a9.webp"],
-    "mens-overshirt": ["https://fstc.kispace.cn/i/2187e6b1f57ea24941264fa4e1e432ac.webp"],
-    "camping-chair": ["https://fstc.kispace.cn/i/9bc120ffb33d52929487b6f8b42973a7.webp"],
-    "commuter-backpack": ["https://fstc.kispace.cn/i/1316d4890c8d3e1cb35c09d98f1760bb.webp"],
-    "wireless-earbuds": ["https://fstc.kispace.cn/i/71bf95293f6fc9eaeb152d27d5d8bf3b.webp"],
-    "vacuum-bottle": ["https://fstc.kispace.cn/i/1905b0b11c9859f0eb838c9b4a911c25.webp"],
+    "mens-overshirt": [
+        "https://fstc.kispace.cn/i/2187e6b1f57ea24941264fa4e1e432ac.webp"
+    ],
+    "camping-chair": [
+        "https://fstc.kispace.cn/i/9bc120ffb33d52929487b6f8b42973a7.webp"
+    ],
+    "commuter-backpack": [
+        "https://fstc.kispace.cn/i/1316d4890c8d3e1cb35c09d98f1760bb.webp"
+    ],
+    "wireless-earbuds": [
+        "https://fstc.kispace.cn/i/71bf95293f6fc9eaeb152d27d5d8bf3b.webp"
+    ],
+    "vacuum-bottle": [
+        "https://fstc.kispace.cn/i/1905b0b11c9859f0eb838c9b4a911c25.webp"
+    ],
     "smart-watch": ["https://fstc.kispace.cn/i/5c65c0e113fd2c4668d864d2a56ff8d8.webp"],
     "laptop-stand": ["https://fstc.kispace.cn/i/cc89b971fde5da1bc473c6e9c8a02462.webp"],
-    "womens-cardigan": ["https://fstc.kispace.cn/i/97113047d38e9fcc55902b25513793c5.webp"],
+    "womens-cardigan": [
+        "https://fstc.kispace.cn/i/97113047d38e9fcc55902b25513793c5.webp"
+    ],
     "desk-lamp": ["https://fstc.kispace.cn/i/c85979cca46e69c6bb7640546fb8fe88.webp"],
-    "garment-steamer": ["https://fstc.kispace.cn/i/0c8300030f857b04a25e136f56c099a1.webp"],
-    "open-ear-earbuds": ["https://fstc.kispace.cn/i/01b765638a193ca35f9705500b4221b4.webp"],
-    "magnetic-power-bank": ["https://fstc.kispace.cn/i/de42c99da812b5ef969961009d69fdbb.webp"],
+    "garment-steamer": [
+        "https://fstc.kispace.cn/i/0c8300030f857b04a25e136f56c099a1.webp"
+    ],
+    "open-ear-earbuds": [
+        "https://fstc.kispace.cn/i/01b765638a193ca35f9705500b4221b4.webp"
+    ],
+    "magnetic-power-bank": [
+        "https://fstc.kispace.cn/i/de42c99da812b5ef969961009d69fdbb.webp"
+    ],
     "usb-c-hub": ["https://fstc.kispace.cn/i/9b1b6844beaf921d35dceee805abf520.webp"],
-    "scented-candle": ["https://fstc.kispace.cn/i/ce5a17fb0f204507dab9995917749fc9.webp"],
+    "scented-candle": [
+        "https://fstc.kispace.cn/i/ce5a17fb0f204507dab9995917749fc9.webp"
+    ],
     "lunch-tote": ["https://fstc.kispace.cn/i/54df066a8c27e5b6283b8e344ef2fd05.webp"],
-    "travel-umbrella": ["https://fstc.kispace.cn/i/6b69a8a34765a51910eeb71290154e47.webp"],
-    "coffee-grinder": ["https://fstc.kispace.cn/i/740a12ef54fa057cecafc666bce70ffb.webp"],
+    "travel-umbrella": [
+        "https://fstc.kispace.cn/i/6b69a8a34765a51910eeb71290154e47.webp"
+    ],
+    "coffee-grinder": [
+        "https://fstc.kispace.cn/i/740a12ef54fa057cecafc666bce70ffb.webp"
+    ],
     "knit-throw": ["https://fstc.kispace.cn/i/e835f154589f0d071317d95e565576ac.webp"],
-    "crossbody-bag": ["https://fstc.kispace.cn/i/60d843c70d4aaa40236532f033db9e84.webp"],
-    "cotton-tshirt": ["https://fstc.kispace.cn/i/dbbc219f4fb95d59e4f25f63cd3fe486.webp"],
-    "yoga-leggings": ["https://fstc.kispace.cn/i/7518e6ddddfe8ca934f25a337aaf27f2.webp"],
-    "sports-bottle": ["https://fstc.kispace.cn/i/346254336cc0787cf95e13982c499f92.webp"],
+    "crossbody-bag": [
+        "https://fstc.kispace.cn/i/60d843c70d4aaa40236532f033db9e84.webp"
+    ],
+    "cotton-tshirt": [
+        "https://fstc.kispace.cn/i/dbbc219f4fb95d59e4f25f63cd3fe486.webp"
+    ],
+    "yoga-leggings": [
+        "https://fstc.kispace.cn/i/7518e6ddddfe8ca934f25a337aaf27f2.webp"
+    ],
+    "sports-bottle": [
+        "https://fstc.kispace.cn/i/346254336cc0787cf95e13982c499f92.webp"
+    ],
     "foam-roller": ["https://fstc.kispace.cn/i/c1aeb59c87e872e6760faf4900d003e4.webp"],
-    "bluetooth-speaker": ["https://fstc.kispace.cn/i/0041a82074eb5f48ab8059ce8e26ef75.webp"],
-    "carry-on-suitcase": ["https://fstc.kispace.cn/i/9f5d67ba4391cbfbaf4dc49a2ce6656c.webp"],
+    "bluetooth-speaker": [
+        "https://fstc.kispace.cn/i/0041a82074eb5f48ab8059ce8e26ef75.webp"
+    ],
+    "carry-on-suitcase": [
+        "https://fstc.kispace.cn/i/9f5d67ba4391cbfbaf4dc49a2ce6656c.webp"
+    ],
     "lint-remover": ["https://fstc.kispace.cn/i/fc5c92b3d35596fbc7d8a2eec7b701bd.webp"],
-    "ceramic-bowls": ["https://fstc.kispace.cn/i/d8e61f41a63066dae140d2a85ed1c8f2.webp"],
-    "kitchen-towels": ["https://fstc.kispace.cn/i/a103bbb246331f12eed21e7e46aaabec.webp"],
-    "precision-screwdriver": ["https://fstc.kispace.cn/i/a449495100834b1a81aa4234326f9361.webp"],
+    "ceramic-bowls": [
+        "https://fstc.kispace.cn/i/d8e61f41a63066dae140d2a85ed1c8f2.webp"
+    ],
+    "kitchen-towels": [
+        "https://fstc.kispace.cn/i/a103bbb246331f12eed21e7e46aaabec.webp"
+    ],
+    "precision-screwdriver": [
+        "https://fstc.kispace.cn/i/a449495100834b1a81aa4234326f9361.webp"
+    ],
 }
 
 # 旧版 Seed 使用过的名称。优先复用这些记录，避免完整 Seed 与旧商品并存。
@@ -475,7 +1352,9 @@ def _ensure_shop(db, seller: User, *, name: str, description: str) -> Shop:
     return shop
 
 
-def _principal_for_seller(seller: User, *, username: str, email: str) -> AuthenticatedPrincipal:
+def _principal_for_seller(
+    seller: User, *, username: str, email: str
+) -> AuthenticatedPrincipal:
     return AuthenticatedPrincipal(
         user_id=seller.id,
         username=username,
@@ -527,7 +1406,9 @@ def _seed_goods(
     assets: dict[str, list[str]],
     goods: list[GoodsSeed],
 ) -> list[Goods]:
-    principal = _principal_for_seller(seller, username=seller.username, email=seller.email)
+    principal = _principal_for_seller(
+        seller, username=seller.username, email=seller.email
+    )
     goods_dao = GoodsDAO(db)
     seeded_goods: list[Goods] = []
     seeded_goods_ids: set[int] = set()
@@ -587,6 +1468,65 @@ def _ensure_buyer(db) -> User:
         )
         print("  示例买家与默认收货地址已创建")
     return buyer
+
+
+def _seed_information_posts(db) -> None:
+    """创建覆盖信息发布各分类及审核状态的可重复演示数据。"""
+    users = {
+        username: UserDAO(db).get_by_username(username)
+        for username in {post["poster"] for post in INFORMATION_POSTS}
+    }
+    now = datetime.now(timezone.utc)
+    dao = InformationPostDAO(db)
+    created_count = 0
+    updated_count = 0
+
+    for item in INFORMATION_POSTS:
+        poster = users[item["poster"]]
+        if poster is None:
+            raise RuntimeError(f"信息发布种子用户不存在：{item['poster']}")
+        post = (
+            db.query(InformationPost)
+            .filter(
+                InformationPost.title == item["title"],
+                InformationPost.poster_user_id == poster.id,
+            )
+            .first()
+        )
+        if post is None:
+            post = dao.create(
+                title=item["title"],
+                category=item["category"],
+                content=item["content"],
+                contact_name=item["contact_name"],
+                contact_phone=item["contact_phone"],
+                poster_user_id=poster.id,
+                price=item["price"],
+                attributes=item["attributes"],
+            )
+            created_count += 1
+        else:
+            post.category = item["category"]
+            post.price = item["price"]
+            post.content = item["content"]
+            post.contact_name = item["contact_name"]
+            post.contact_phone = item["contact_phone"]
+            post.attributes = item["attributes"]
+            updated_count += 1
+
+        created_at = now - timedelta(days=item["age_days"])
+        post.status = item["status"]
+        post.reject_reason = item["reject_reason"]
+        post.is_top = item["is_top"]
+        post.view_count = item["view_count"]
+        post.created_at = created_at
+        post.updated_at = created_at
+        post.approved_at = (
+            created_at if item["status"] == InformationStatus.APPROVED else None
+        )
+
+    db.flush()
+    print(f"  信息发布已创建 {created_count} 条、更新 {updated_count} 条演示记录")
 
 
 def _seed_evaluations(
@@ -698,8 +1638,12 @@ def _seed(db, *, assets: dict[str, list[str]]) -> None:
             phone=shop_cfg["phone"],
             role="user",
         )
-        shop = _ensure_shop(db, seller, name=shop_cfg["name"], description=shop_cfg["description"])
-        shop_goods = [item for item in GOODS if item["category"] in shop_cfg["categories"]]
+        shop = _ensure_shop(
+            db, seller, name=shop_cfg["name"], description=shop_cfg["description"]
+        )
+        shop_goods = [
+            item for item in GOODS if item["category"] in shop_cfg["categories"]
+        ]
         goods_list = _seed_goods(
             db,
             seller=seller,
@@ -711,10 +1655,16 @@ def _seed(db, *, assets: dict[str, list[str]]) -> None:
         _seed_evaluations(db, buyer=buyer, shop=shop, goods_list=goods_list)
         print(f"  店铺「{shop.name}」已就绪：{len(goods_list)} 个在售商品")
 
-    total_goods = sum(1 for item in GOODS if item["category"] in {c for s in SHOPS for c in s["categories"]})
+    _seed_information_posts(db)
+    total_goods = sum(
+        1
+        for item in GOODS
+        if item["category"] in {c for s in SHOPS for c in s["categories"]}
+    )
     print("种子数据就绪。")
     print(f"  店铺数量：{len(SHOPS)}")
     print(f"  商品数量：{total_goods}")
+    print(f"  信息发布数量：{len(INFORMATION_POSTS)}")
     if assets:
         print(f"  KiVault 图片清单：{len(assets)} 个商品")
     else:
@@ -723,6 +1673,7 @@ def _seed(db, *, assets: dict[str, list[str]]) -> None:
 
 def _reset(db) -> None:
     tables = [
+        "information_posts",
         "mall_chat_messages",
         "mall_payments",
         "mall_withdraw_requests",

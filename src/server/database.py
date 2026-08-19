@@ -249,6 +249,7 @@ def import_all_models() -> None:
     from src.server.files import models as _9  # noqa: F401
     from src.server.notifications import models as _10  # noqa: F401
     from src.server.mall import models as _11  # noqa: F401
+    from src.server.information import models as _12  # noqa: F401
 
 
 def get_database_info() -> DatabaseInfo:
