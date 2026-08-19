@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { Link, useNavigate, useParams } from 'react-router-dom'
 import { App, Button, Divider, Empty, InputNumber, Pagination, Rate, Spin, Tag } from 'antd'
 import { HeartFilled, HeartOutlined, ShoppingCartOutlined } from '@ant-design/icons'
 import {
@@ -284,7 +284,7 @@ export default function GoodsDetailPage() {
 
         <Divider />
         <div className="text-sm" style={{ color: '#333', fontWeight: 500 }}>
-          店铺：{goods.shop.name}
+          店铺：<Link to={`/mall/shop/${goods.shop.id}`} style={{ color: '#F31947' }}>{goods.shop.name}</Link>
         </div>
       </div>
       </div>

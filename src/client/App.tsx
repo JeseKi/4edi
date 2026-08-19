@@ -18,6 +18,7 @@ import NotificationDetailPage from './pages/notifications/NotificationDetailPage
 import MallLayout from './components/mall/MallLayout'
 import MallHomePage from './pages/mall/HomePage'
 import GoodsDetailPage from './pages/mall/GoodsDetailPage'
+import MallShopPage from './pages/mall/ShopPage'
 import CartPage from './pages/mall/CartPage'
 import CheckoutPage from './pages/mall/CheckoutPage'
 import OrdersPage from './pages/mall/OrdersPage'
@@ -102,6 +103,7 @@ function AppRoutes() {
           <Route element={<MallLayout />}>
             <Route path="/mall" element={<MallHomePage />} />
             <Route path="/mall/goods/:goodsId" element={<GoodsDetailPage />} />
+            <Route path="/mall/shop/:shopId" element={<MallShopPage />} />
             <Route path="/mall/cart" element={<RequireAuth><CartPage /></RequireAuth>} />
             <Route path="/mall/checkout" element={<RequireAuth><CheckoutPage /></RequireAuth>} />
             <Route path="/mall/orders" element={<RequireAuth><OrdersPage /></RequireAuth>} />

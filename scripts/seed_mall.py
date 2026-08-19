@@ -37,7 +37,7 @@ from src.server.mall.dao import (
     ShopDAO,
     WalletDAO,
 )
-from src.server.mall.models import Goods, GoodsStatus, OrderStatus, ShopStatus
+from src.server.mall.models import Goods, GoodsStatus, OrderStatus, Shop, ShopStatus
 from src.server.mall.service import short_transactions as service
 
 
@@ -307,12 +307,52 @@ SELLER_PASSWORD = "seller123"
 SELLER_EMAIL = "seller@example.com"
 SELLER_PHONE = "13800000001"
 
+SELLER2_USERNAME = "seller2"
+SELLER2_PASSWORD = "seller123"
+SELLER2_EMAIL = "seller2@example.com"
+SELLER2_PHONE = "13800000003"
+
+SELLER3_USERNAME = "seller3"
+SELLER3_PASSWORD = "seller123"
+SELLER3_EMAIL = "seller3@example.com"
+SELLER3_PHONE = "13800000004"
+
 BUYER_USERNAME = "buyer"
 BUYER_PASSWORD = "buyer123"
 BUYER_EMAIL = "buyer@example.com"
 BUYER_PHONE = "13800000002"
 
-SHOP_NAME = "示例优选旗舰店"
+# 演示店铺配置：每个店铺由独立卖家账号持有（后端约束「一用户一家店」）。
+# category 字段对应 GOODS 中每个商品的 item["category"]，用于把商品分配到各店铺。
+SHOPS: list[dict] = [
+    {
+        "username": SELLER_USERNAME,
+        "password": SELLER_PASSWORD,
+        "email": SELLER_EMAIL,
+        "phone": SELLER_PHONE,
+        "name": "示例优选旗舰店",
+        "description": "官方演示店铺：主营数码家电，覆盖手机通讯与电脑办公商品，全部为测试数据。",
+        "categories": {"手机通讯", "电脑办公"},
+    },
+    {
+        "username": SELLER2_USERNAME,
+        "password": SELLER2_PASSWORD,
+        "email": SELLER2_EMAIL,
+        "phone": SELLER2_PHONE,
+        "name": "示例生活优选店",
+        "description": "官方演示店铺：主营家居日用、杯壶水具与休闲食品，全部为测试数据。",
+        "categories": {"家居日用", "杯壶水具", "休闲零食"},
+    },
+    {
+        "username": SELLER3_USERNAME,
+        "password": SELLER3_PASSWORD,
+        "email": SELLER3_EMAIL,
+        "phone": SELLER3_PHONE,
+        "name": "示例运动服饰店",
+        "description": "官方演示店铺：主营服装鞋包与运动户外商品，全部为测试数据。",
+        "categories": {"男装", "女装", "运动鞋", "户外装备"},
+    },
+]
 
 ASSET_URLS: dict[str, list[str]] = {
     "mechanical-keyboard": ["https://fstc.kispace.cn/i/1e33eb265a170d578076da3fe80411b1.webp"],
@@ -410,19 +450,18 @@ def _ensure_categories(db) -> dict[str, int]:
     return category_map
 
 
-def _ensure_shop(db, seller: User):
+def _ensure_shop(db, seller: User, *, name: str, description: str) -> Shop:
     dao = ShopDAO(db)
     shop = dao.get_by_owner(seller.id)
-    description = "官方演示店铺：覆盖数码、服饰、运动、食品与日用商品，全部为测试数据。"
     if shop is None:
         shop = dao.create(
             owner_user_id=seller.id,
-            name=SHOP_NAME,
+            name=name,
             description=description,
             avatar="/mall/shop-avatar.svg",
         )
     else:
-        shop.name = SHOP_NAME
+        shop.name = name
         shop.description = description
         shop.avatar = "/mall/shop-avatar.svg"
 
@@ -436,12 +475,12 @@ def _ensure_shop(db, seller: User):
     return shop
 
 
-def _principal_for_seller(seller: User) -> AuthenticatedPrincipal:
+def _principal_for_seller(seller: User, *, username: str, email: str) -> AuthenticatedPrincipal:
     return AuthenticatedPrincipal(
         user_id=seller.id,
-        username=SELLER_USERNAME,
+        username=username,
         role=UserRole.USER.value,
-        email=SELLER_EMAIL,
+        email=email,
         two_factor_enabled=False,
     )
 
@@ -480,31 +519,37 @@ def _find_seed_goods(goods_dao: GoodsDAO, *, shop_id: int, item: GoodsSeed):
 
 
 def _seed_goods(
-    db, *, seller: User, shop_id: int, category_map: dict[str, int], assets: dict[str, list[str]]
+    db,
+    *,
+    seller: User,
+    shop_id: int,
+    category_map: dict[str, int],
+    assets: dict[str, list[str]],
+    goods: list[GoodsSeed],
 ) -> list[Goods]:
-    principal = _principal_for_seller(seller)
+    principal = _principal_for_seller(seller, username=seller.username, email=seller.email)
     goods_dao = GoodsDAO(db)
     seeded_goods: list[Goods] = []
     seeded_goods_ids: set[int] = set()
 
-    for index, item in enumerate(GOODS, start=1):
+    for index, item in enumerate(goods, start=1):
         payload = _goods_payload(item, category_map, assets)
         existing = _find_seed_goods(goods_dao, shop_id=shop_id, item=item)
         if existing is None:
-            goods = service.create_goods(db, principal, payload)
+            goods_obj = service.create_goods(db, principal, payload)
             action = "创建"
         else:
-            goods = service.update_goods(db, principal, existing.id, payload)
+            goods_obj = service.update_goods(db, principal, existing.id, payload)
             action = "更新"
 
-        goods.status = GoodsStatus.ON
-        goods.sales = max(goods.sales, index * 37)
-        seeded_goods.append(goods)
-        seeded_goods_ids.add(goods.id)
-        print(f"  商品已{action}：{goods.name}（{len(payload['images'])} 张图片）")
+        goods_obj.status = GoodsStatus.ON
+        goods_obj.sales = max(goods_obj.sales, index * 37)
+        seeded_goods.append(goods_obj)
+        seeded_goods_ids.add(goods_obj.id)
+        print(f"  商品已{action}：{goods_obj.name}（{len(payload['images'])} 张图片）")
 
-    # 删除本脚本早先错误创建的同名重复演示商品。只作用于示例店铺，且仅清理目录中的精确名称。
-    for item in GOODS:
+    # 删除本脚本早先错误创建的同名重复演示商品。只作用于当前店铺，且仅清理目录中的精确名称。
+    for item in goods:
         duplicates = goods_dao.list_for_shop(
             shop_id=shop_id,
             status=None,
@@ -512,10 +557,10 @@ def _seed_goods(
             page=1,
             page_size=50,
         )[0]
-        for goods in duplicates:
-            if goods.name == item["name"] and goods.id not in seeded_goods_ids:
-                service.delete_goods(db, principal, goods.id)
-                print(f"  已清理重复演示商品：{goods.name}")
+        for goods_obj in duplicates:
+            if goods_obj.name == item["name"] and goods_obj.id not in seeded_goods_ids:
+                service.delete_goods(db, principal, goods_obj.id)
+                print(f"  已清理重复演示商品：{goods_obj.name}")
 
     return seeded_goods
 
@@ -642,27 +687,34 @@ def _seed_evaluations(
 
 def _seed(db, *, assets: dict[str, list[str]]) -> None:
     category_map = _ensure_categories(db)
-    seller = _ensure_user(
-        db,
-        username=SELLER_USERNAME,
-        password=SELLER_PASSWORD,
-        email=SELLER_EMAIL,
-        phone=SELLER_PHONE,
-        role="user",
-    )
-    shop = _ensure_shop(db, seller)
-    goods_list = _seed_goods(
-        db,
-        seller=seller,
-        shop_id=shop.id,
-        category_map=category_map,
-        assets=assets,
-    )
     buyer = _ensure_buyer(db)
-    _seed_evaluations(db, buyer=buyer, shop=shop, goods_list=goods_list)
 
+    for shop_cfg in SHOPS:
+        seller = _ensure_user(
+            db,
+            username=shop_cfg["username"],
+            password=shop_cfg["password"],
+            email=shop_cfg["email"],
+            phone=shop_cfg["phone"],
+            role="user",
+        )
+        shop = _ensure_shop(db, seller, name=shop_cfg["name"], description=shop_cfg["description"])
+        shop_goods = [item for item in GOODS if item["category"] in shop_cfg["categories"]]
+        goods_list = _seed_goods(
+            db,
+            seller=seller,
+            shop_id=shop.id,
+            category_map=category_map,
+            assets=assets,
+            goods=shop_goods,
+        )
+        _seed_evaluations(db, buyer=buyer, shop=shop, goods_list=goods_list)
+        print(f"  店铺「{shop.name}」已就绪：{len(goods_list)} 个在售商品")
+
+    total_goods = sum(1 for item in GOODS if item["category"] in {c for s in SHOPS for c in s["categories"]})
     print("种子数据就绪。")
-    print(f"  商品数量：{len(GOODS)}")
+    print(f"  店铺数量：{len(SHOPS)}")
+    print(f"  商品数量：{total_goods}")
     if assets:
         print(f"  KiVault 图片清单：{len(assets)} 个商品")
     else:
