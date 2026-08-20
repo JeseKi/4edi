@@ -24,6 +24,7 @@ export default function MallLayout() {
   const [keyword, setKeyword] = useState('')
   const [cartCount, setCartCount] = useState(0)
   const infoEnabled = new Set(features).has('information')
+  const footerRef = new URLSearchParams(location.search).get('ref')
 
   useEffect(() => {
     let cancelled = false
@@ -156,7 +157,7 @@ export default function MallLayout() {
           <Outlet />
         </main>
 
-        {location.pathname.startsWith('/mall/information') ? (
+        {footerRef === 'information' || location.pathname.startsWith('/mall/information') ? (
           <InformationFooter />
         ) : (
           <MallFooter />

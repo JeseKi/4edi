@@ -1,5 +1,13 @@
 import { Link } from 'react-router-dom'
 
+const withRef = (to: string) => {
+  const hashIndex = to.indexOf('#')
+  const hash = hashIndex >= 0 ? to.slice(hashIndex) : ''
+  const path = hashIndex >= 0 ? to.slice(0, hashIndex) : to
+  const sep = path.includes('?') ? '&' : '?'
+  return `${path}${sep}ref=information${hash}`
+}
+
 export default function InformationFooter() {
   return (
     <footer style={{ color: '#666', background: '#fff' }}>
@@ -49,7 +57,7 @@ export default function InformationFooter() {
               <ul className="space-y-2">
                 {col.items.map((item) => (
                   <li key={item.text} className="text-xs" style={{ color: '#999' }}>
-                    <Link to={item.to}>{item.text}</Link>
+                    <Link to={withRef(item.to)}>{item.text}</Link>
                   </li>
                 ))}
               </ul>
@@ -61,13 +69,13 @@ export default function InformationFooter() {
           className="text-center text-sm py-4"
           style={{ color: '#666', borderTop: '1px solid #f5f5f5' }}
         >
-          <Link to="/mall/information/post">信息发布</Link>
+          <Link to={withRef('/mall/information/post')}>信息发布</Link>
           <span style={{ margin: '0 8px', color: '#ddd' }}>·</span>
-          <Link to="/mall/complaint">投诉入口</Link>
+          <Link to={withRef('/mall/complaint')}>投诉入口</Link>
           <span style={{ margin: '0 8px', color: '#ddd' }}>·</span>
-          <Link to="/mall/information?sort=hot">热门榜单</Link>
+          <Link to={withRef('/mall/information?sort=hot')}>热门榜单</Link>
           <span style={{ margin: '0 8px', color: '#ddd' }}>·</span>
-          <Link to="/mall/information?sort=recommended">热门推荐</Link>
+          <Link to={withRef('/mall/information?sort=recommended')}>热门推荐</Link>
         </div>
 
         <div className="text-center text-xs pb-6" style={{ color: '#999' }}>

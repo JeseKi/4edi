@@ -2,6 +2,14 @@ import { Link } from 'react-router-dom'
 
 const MALL_PRIMARY = '#F31947'
 
+const withRef = (to: string) => {
+  const hashIndex = to.indexOf('#')
+  const hash = hashIndex >= 0 ? to.slice(hashIndex) : ''
+  const path = hashIndex >= 0 ? to.slice(0, hashIndex) : to
+  const sep = path.includes('?') ? '&' : '?'
+  return `${path}${sep}ref=mall${hash}`
+}
+
 export default function MallFooter() {
   return (
     <footer style={{ color: '#666', background: '#fff' }}>
@@ -81,7 +89,7 @@ export default function MallFooter() {
               <ul className="space-y-2">
                 {col.items.map((item) => (
                   <li key={item.id} className="text-xs" style={{ color: '#999' }}>
-                    <Link to={`/mall/help#${item.id}`}>{item.text}</Link>
+                    <Link to={withRef(`/mall/help#${item.id}`)}>{item.text}</Link>
                   </li>
                 ))}
               </ul>
@@ -93,15 +101,15 @@ export default function MallFooter() {
           className="text-center text-sm py-4"
           style={{ color: '#666', borderTop: '1px solid #f5f5f5' }}
         >
-          <Link to="/mall/info/about">关于我们</Link>
+          <Link to={withRef('/mall/info/about')}>关于我们</Link>
           <span style={{ margin: '0 8px', color: '#ddd' }}>·</span>
-          <Link to="/mall/info/contact">联系我们</Link>
+          <Link to={withRef('/mall/info/contact')}>联系我们</Link>
           <span style={{ margin: '0 8px', color: '#ddd' }}>·</span>
-          <Link to="/mall/info/service">联系客服</Link>
+          <Link to={withRef('/mall/info/service')}>联系客服</Link>
           <span style={{ margin: '0 8px', color: '#ddd' }}>·</span>
-          <Link to="/mall/info/seller-help">商家帮助</Link>
+          <Link to={withRef('/mall/info/seller-help')}>商家帮助</Link>
           <span style={{ margin: '0 8px', color: '#ddd' }}>·</span>
-          <Link to="/mall/info/privacy">隐私政策</Link>
+          <Link to={withRef('/mall/info/privacy')}>隐私政策</Link>
         </div>
 
         <div className="text-center text-xs pb-6" style={{ color: '#999' }}>
