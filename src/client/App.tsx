@@ -16,6 +16,7 @@ import LandingPage from './pages/landing/LandingPage'
 import NotificationInboxPage from './pages/notifications/NotificationInboxPage'
 import NotificationDetailPage from './pages/notifications/NotificationDetailPage'
 import MallLayout from './components/mall/MallLayout'
+import InformationLayout from './components/mall/InformationLayout'
 import MallHomePage from './pages/mall/HomePage'
 import GoodsDetailPage from './pages/mall/GoodsDetailPage'
 import MallShopPage from './pages/mall/ShopPage'
@@ -122,15 +123,15 @@ function AppRoutes() {
             <Route path="/mall/chat" element={<RequireAuth><ChatPage /></RequireAuth>} />
             <Route path="/mall/help" element={<HelpCenterPage />} />
             <Route path="/mall/info/:key" element={<SiteInfoPage />} />
-            {hasFeature('information') && (
-              <>
-                <Route path="/mall/information" element={<InformationCenterPage />} />
-                <Route path="/mall/information/post" element={<RequireAuth><InformationPostPage /></RequireAuth>} />
-                <Route path="/mall/information/mine" element={<RequireAuth><InformationMinePage /></RequireAuth>} />
-                <Route path="/mall/information/:postId" element={<InformationDetailPage />} />
-                <Route path="/mall/complaint" element={<RequireAuth><ComplaintPage /></RequireAuth>} />
-              </>
-            )}
+          </Route>
+        )}
+        {hasFeature('information') && (
+          <Route element={<InformationLayout />}>
+            <Route path="/mall/information" element={<InformationCenterPage />} />
+            <Route path="/mall/information/post" element={<RequireAuth><InformationPostPage /></RequireAuth>} />
+            <Route path="/mall/information/mine" element={<RequireAuth><InformationMinePage /></RequireAuth>} />
+            <Route path="/mall/information/:postId" element={<InformationDetailPage />} />
+            <Route path="/mall/complaint" element={<RequireAuth><ComplaintPage /></RequireAuth>} />
           </Route>
         )}
         {hasFeature('mall') && (
