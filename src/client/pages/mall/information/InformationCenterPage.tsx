@@ -29,7 +29,10 @@ export default function InformationCenterPage() {
   const [searchParams, setSearchParams] = useSearchParams()
   const category = searchParams.get('category') ?? ''
   const keyword = searchParams.get('keyword') ?? ''
-  const [sort, setSort] = useState<InfoSort>('latest')
+  const urlSort = searchParams.get('sort')
+  const [sort, setSort] = useState<InfoSort>(
+    urlSort === 'hot' || urlSort === 'recommended' ? urlSort : 'latest',
+  )
   const [page, setPage] = useState(1)
   const [pageSize] = useState(12)
   const [categories, setCategories] = useState<InfoCategory[]>([])
@@ -171,6 +174,9 @@ export default function InformationCenterPage() {
               value={sort}
               onChange={(value) => {
                 setSort(value as InfoSort)
+                const next = new URLSearchParams(searchParams)
+                next.set('sort', value as string)
+                setSearchParams(next)
                 setPage(1)
               }}
             />

@@ -35,6 +35,7 @@ import InformationCenterPage from './pages/mall/information/InformationCenterPag
 import InformationDetailPage from './pages/mall/information/InformationDetailPage'
 import InformationPostPage from './pages/mall/information/InformationPostPage'
 import InformationMinePage from './pages/mall/information/InformationMinePage'
+import ComplaintPage from './pages/mall/ComplaintPage'
 import InformationAdminPage from './pages/mall/admin/InformationAdminPage'
 import SellerLayout from './components/mall/SellerLayout'
 import ShopManagePage from './pages/mall/seller/ShopManagePage'
@@ -127,6 +128,7 @@ function AppRoutes() {
                 <Route path="/mall/information/post" element={<RequireAuth><InformationPostPage /></RequireAuth>} />
                 <Route path="/mall/information/mine" element={<RequireAuth><InformationMinePage /></RequireAuth>} />
                 <Route path="/mall/information/:postId" element={<InformationDetailPage />} />
+                <Route path="/mall/complaint" element={<RequireAuth><ComplaintPage /></RequireAuth>} />
               </>
             )}
           </Route>

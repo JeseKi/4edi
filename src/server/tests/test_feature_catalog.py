@@ -24,6 +24,7 @@ def test_all_expands_to_non_development_features_outside_dev() -> None:
         "admin",
         "audit",
         "auth",
+        "complaint",
         "example",
         "files",
         "frontend-error-reporting",
