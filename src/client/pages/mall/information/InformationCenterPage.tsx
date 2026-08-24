@@ -111,7 +111,7 @@ export default function InformationCenterPage() {
       >
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div>
-            <h1 className="text-2xl font-bold mb-1">沐泽 · 分类信息中心</h1>
+            <h1 className="text-2xl font-bold mb-1">沐泽健康</h1>
             <p className="text-sm opacity-90">
               小程序 / APP / 软件 / 网站建设 —— 优质服务商信息都在这里
             </p>

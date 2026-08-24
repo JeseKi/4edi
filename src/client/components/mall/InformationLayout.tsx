@@ -62,7 +62,7 @@ export default function InformationLayout() {
           >
             <Link to="/mall/information" className="flex items-center shrink-0">
               <span className="text-xl font-bold" style={{ color: MALL_PRIMARY }}>
-                沐泽 · 信息发布
+                沐泽健康
               </span>
             </Link>
             <nav className="flex items-center gap-5 ml-auto text-sm">
