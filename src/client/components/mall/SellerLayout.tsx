@@ -40,7 +40,7 @@ export default function SellerLayout() {
           <div className="mx-auto flex items-center justify-between px-4" style={{ maxWidth: 1184, height: 56 }}>
             <div className="flex items-center gap-6">
               <Link to="/mall" className="text-lg font-bold" style={{ color: '#F31947' }}>
-                沐泽商城
+                沐泽健康
               </Link>
               <span className="text-sm" style={{ color: '#333' }}>
                 商家中心

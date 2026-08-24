@@ -91,7 +91,7 @@ export default function MallLayout() {
           >
             <Link to="/mall" className="flex items-center shrink-0">
               <span className="text-xl font-bold" style={{ color: MALL_PRIMARY }}>
-                沐泽商城
+                沐泽健康
               </span>
             </Link>
             <div className="flex items-center flex-1 max-w-[480px]">

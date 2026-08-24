@@ -113,7 +113,7 @@ export default function MallFooter() {
         </div>
 
         <div className="text-center text-xs pb-6" style={{ color: '#999' }}>
-          沐泽商城 ·{' '}
+          沐泽健康 ·{' '}
           <a
             href="https://beian.miit.gov.cn/"
             target="_blank"
