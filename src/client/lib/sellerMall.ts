@@ -15,6 +15,8 @@ import type {
   MallRefund,
   MallRefundStatus,
   MallShop,
+  ShopAgreement,
+  ShopAdminDetail,
   MallWallet,
   MallWalletLedger,
   MallWithdraw,
@@ -42,7 +44,7 @@ export interface MallCouponPayload {
 export const getMyMallShop = async (): Promise<MallShop> =>
   (await api.get<MallShop>('/mall/seller/shop')).data
 
-export const applyMallShop = async (payload: {
+export interface MallShopApplicationPayload {
   name: string
   description?: string
   avatar?: string
@@ -51,7 +53,34 @@ export const applyMallShop = async (payload: {
   business_license_asset_id: string
   identity_front_asset_id: string
   identity_back_asset_id: string
-}): Promise<MallShop> => (await api.post<MallShop>('/mall/seller/shop/apply', payload)).data
+  legal_entity_name: string
+  unified_social_credit_code: string
+  legal_representative: string
+  registered_address: string
+  business_address: string
+  contact_phone: string
+  business_license_valid_until?: string
+  business_license_long_term: boolean
+}
+
+export const applyMallShop = async (payload: MallShopApplicationPayload): Promise<MallShop> =>
+  (await api.post<MallShop>('/mall/seller/shop/apply', payload)).data
+
+export const resubmitMallShopQualification = async (
+  payload: MallShopApplicationPayload,
+): Promise<MallShop> =>
+  (await api.post<MallShop>('/mall/seller/shop/qualification/resubmit', payload)).data
+
+export const getMyShopAgreement = async (): Promise<ShopAgreement> =>
+  (await api.get<ShopAgreement>('/mall/seller/shop/agreement')).data
+
+export const submitMerchantSignedAgreement = async (payload: {
+  agreement_number: string
+  document_version: string
+  merchant_signed_asset_id: string
+  confirmed: boolean
+}): Promise<MallShop> =>
+  (await api.post<MallShop>('/mall/seller/shop/agreement/merchant-sign', payload)).data
 
 export const updateMallShop = async (payload: {
   name?: string
@@ -271,6 +300,7 @@ export const sendSellerChatMessage = async (payload: {
 
 export const listAdminShops = async (params: {
   status?: MallShop['status']
+  qualification_state?: 'expiring_soon' | 'expired'
   keyword?: string
   page?: number
   page_size?: number
@@ -279,12 +309,43 @@ export const listAdminShops = async (params: {
 
 export const reviewAdminShop = async (
   shopId: number,
-  payload: { approved: boolean; reject_reason?: string },
+  payload: {
+    approved: boolean
+    reject_reason?: string
+    evidence_asset_id: string
+    registration_status: string
+    verification_source: string
+    entity_name_matches: boolean
+    credit_code_matches: boolean
+    legal_representative_matches: boolean
+    registration_status_valid: boolean
+    registered_address_matches: boolean
+    business_scope_matches: boolean
+    note?: string
+  },
 ): Promise<MallShop> =>
   (await api.post<MallShop>(`/mall/admin/shops/${shopId}/review`, payload)).data
 
+export const generateAdminShopAgreement = async (shopId: number): Promise<ShopAgreement> =>
+  (await api.post<ShopAgreement>(`/mall/admin/shops/${shopId}/agreement/generate`)).data
+
+export const submitAdminPlatformSignedAgreement = async (
+  shopId: number,
+  payload: { platform_signed_asset_id: string; agreement_matches: boolean },
+): Promise<MallShop> =>
+  (await api.post<MallShop>(`/mall/admin/shops/${shopId}/agreement/platform-sign`, payload)).data
+
+export const archiveAdminShopAgreement = async (shopId: number): Promise<MallShop> =>
+  (await api.post<MallShop>(`/mall/admin/shops/${shopId}/agreement/archive`)).data
+
+export const approveAdminShop = async (shopId: number): Promise<MallShop> =>
+  (await api.post<MallShop>(`/mall/admin/shops/${shopId}/approve`)).data
+
 export const closeAdminShop = async (shopId: number): Promise<MallShop> =>
   (await api.post<MallShop>(`/mall/admin/shops/${shopId}/close`)).data
+
+export const getAdminShopDetail = async (shopId: number): Promise<ShopAdminDetail> =>
+  (await api.get<ShopAdminDetail>(`/mall/admin/shops/${shopId}`)).data
 
 export const listAdminWithdrawals = async (params: {
   status?: MallWithdrawStatus

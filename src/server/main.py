@@ -19,6 +19,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.types import Scope
 
 from src.server.config import global_config
+from src.server.compliance import public_site_config, validate_compliance_readiness
 from src.server.auth.config import auth_config
 from src.server.database import (
     bootstrap_database_data,
@@ -44,6 +45,10 @@ enabled_feature_specs = resolve_features(
     global_config.app.enabled_features, app_env=global_config.app.env
 )
 enabled_feature_names = frozenset(feature.name for feature in enabled_feature_specs)
+validate_compliance_readiness(
+    app_env=global_config.app.env,
+    enabled_features=enabled_feature_names,
+)
 
 setup_logging(process_role="web")
 
@@ -103,8 +108,8 @@ async def lifespan(app: FastAPI):
 
 # --- 应用实例与中间件 ---
 fastapi_kwargs = {
-    "title": "Fullstack Template Backend",
-    "description": "提供身份验证、数据库交互及示例模块的后端服务。",
+    "title": f"{global_config.compliance.site_name} API",
+    "description": "提供用户、分类信息、在线交易、企业入驻与合规审核服务。",
     "lifespan": lifespan,
 }
 
@@ -248,7 +253,12 @@ def frontend_config():
     notifications = {"trusted_external_origins": []}
     if "notifications" in enabled_feature_names:
         notifications["trusted_external_origins"] = global_config.notifications.trusted_external_origins
-    return {"features": sorted(enabled_feature_names), "turnstile": turnstile, "notifications": notifications}
+    return {
+        "features": sorted(enabled_feature_names),
+        "turnstile": turnstile,
+        "notifications": notifications,
+        "site": public_site_config(),
+    }
 
 
 for feature in enabled_feature_specs:

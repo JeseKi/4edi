@@ -7,6 +7,10 @@ from src.server.auth import service as auth_service
 from src.server.mall.schemas import EvaluationOut, OrderOut
 
 from src.server.auth.tests._auth_router_helpers import _auth_headers
+from src.server.mall.tests._compliance_helpers import (
+    complete_shop_onboarding,
+    shop_application_payload,
+)
 
 
 def _register(
@@ -48,18 +52,13 @@ def _seed_shop(test_client, *, seller_headers, admin_headers):
     """申请店铺并通过审核。返回 shop_id。"""
     resp = test_client.post(
         "/api/mall/seller/shop/apply",
-        json={"name": "评价测试店", "description": "自动化测试店铺", "real_name": "测试商家", "identity_number": "110101199001011234", "business_license_asset_id": "license", "identity_front_asset_id": "id-front", "identity_back_asset_id": "id-back"},
+        json=shop_application_payload(test_client, seller_headers, name="评价测试店"),
         headers=seller_headers,
     )
     assert resp.status_code == 201, resp.text
     shop_id = resp.json()["id"]
 
-    resp = test_client.post(
-        f"/api/mall/admin/shops/{shop_id}/review",
-        json={"approved": True},
-        headers=admin_headers,
-    )
-    assert resp.status_code == 200, resp.text
+    complete_shop_onboarding(test_client, seller_headers, admin_headers, shop_id)
     return shop_id
 
 
@@ -386,17 +385,16 @@ def test_seller_reply_evaluation(test_client, test_db_session, init_test_databas
     )
     resp = test_client.post(
         "/api/mall/seller/shop/apply",
-        json={"name": "另一家店", "real_name": "测试商家", "identity_number": "110101199001011234", "business_license_asset_id": "license", "identity_front_asset_id": "id-front", "identity_back_asset_id": "id-back"},
+        json=shop_application_payload(
+            test_client, other_seller_headers, name="另一家店"
+        ),
         headers=other_seller_headers,
     )
     assert resp.status_code == 201, resp.text
     other_shop_id = resp.json()["id"]
-    resp = test_client.post(
-        f"/api/mall/admin/shops/{other_shop_id}/review",
-        json={"approved": True},
-        headers=admin_headers,
+    complete_shop_onboarding(
+        test_client, other_seller_headers, admin_headers, other_shop_id
     )
-    assert resp.status_code == 200, resp.text
     resp = test_client.post(
         f"/api/mall/seller/evaluations/{evaluation.id}/reply",
         json={"content": "抢回复"},

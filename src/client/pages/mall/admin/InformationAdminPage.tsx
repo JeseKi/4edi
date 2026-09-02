@@ -269,6 +269,14 @@ export default function InformationAdminPage() {
             <Descriptions.Item label="价格">{detail.price || '面议'}</Descriptions.Item>
             <Descriptions.Item label="发布人 ID">{detail.poster_user_id}</Descriptions.Item>
             <Descriptions.Item label="发布人">{detail.poster_username}</Descriptions.Item>
+            <Descriptions.Item label="实名记录编号">{detail.publisher_verification_id || '-'}</Descriptions.Item>
+            <Descriptions.Item label="实名姓名">{detail.publisher_real_name || '-'}</Descriptions.Item>
+            <Descriptions.Item label="证件号码">{detail.publisher_document_number_masked || '-'}</Descriptions.Item>
+            <Descriptions.Item label="实名有效">
+              <Tag color={detail.publisher_verification_valid ? 'green' : 'red'}>
+                {detail.publisher_verification_valid ? '有效' : '无效或缺失'}
+              </Tag>
+            </Descriptions.Item>
             <Descriptions.Item label="联系人">{detail.contact_name}</Descriptions.Item>
             <Descriptions.Item label="联系电话">{detail.contact_phone || '-'}</Descriptions.Item>
             <Descriptions.Item label="发布时间">

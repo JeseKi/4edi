@@ -2,9 +2,12 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { App, Button, Col, Form, Input, Row, Select, Spin } from 'antd'
 import { SendOutlined, ArrowRightOutlined } from '@ant-design/icons'
-import { createInformation, listInformationCategories } from '../../../lib/information'
+import { createInformation, listInformationCategories, listMyPublisherVerifications } from '../../../lib/information'
 import { resolveApiErrorMessage } from '../../../lib/error'
 import type { InfoCategory } from '../../../lib/types'
+import { Alert } from 'antd'
+import { Link } from 'react-router-dom'
+import CurrentLegalConsent from '../../../components/legal/CurrentLegalConsent'
 
 const MALL_PRIMARY = '#F31947'
 
@@ -23,6 +26,7 @@ export default function InformationPostPage() {
   const [categories, setCategories] = useState<InfoCategory[]>([])
   const [loading, setLoading] = useState(true)
   const [submitting, setSubmitting] = useState(false)
+  const [verificationValid, setVerificationValid] = useState(false)
   const categoryKey = Form.useWatch('category', form)
 
   useEffect(() => {
@@ -31,6 +35,12 @@ export default function InformationPostPage() {
       .catch((err) => message.error(resolveApiErrorMessage(err, '分类加载失败')))
       .finally(() => setLoading(false))
   }, [message])
+
+  useEffect(() => {
+    listMyPublisherVerifications()
+      .then((items) => setVerificationValid(items.some((item) => item.is_currently_valid)))
+      .catch(() => setVerificationValid(false))
+  }, [])
 
   const currentCategory = useMemo(
     () => categories.find((c) => c.key === categoryKey) ?? null,
@@ -96,6 +106,16 @@ export default function InformationPostPage() {
   return (
     <div className="flex gap-4 items-start">
       <div className="flex-1 min-w-0 rounded-lg bg-white p-6">
+        <CurrentLegalConsent />
+        {!verificationValid && (
+          <Alert
+            className="mb-4"
+            type="warning"
+            showIcon
+            message="发布信息前需要完成发布者实名核验"
+            description={<Link to="/mall/information/verification">查看实名状态或提交核验材料</Link>}
+          />
+        )}
         <h3 className="text-base font-bold mb-4" style={{ color: '#333' }}>
           发布信息
         </h3>
@@ -174,6 +194,7 @@ export default function InformationPostPage() {
             size="large"
             icon={<SendOutlined />}
             loading={submitting}
+            disabled={!verificationValid}
             onClick={submit}
             style={{ background: MALL_PRIMARY }}
           >

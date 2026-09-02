@@ -14,6 +14,7 @@ from pydantic_settings import (
 )
 
 from src.server.auth.config import AuthConfig
+from src.server.compliance.config import ComplianceConfig
 from src.server.auth.sms_config import SmsConfig
 from src.server.files.config import FilesConfig
 from src.server.mail.config import MailConfig
@@ -110,6 +111,11 @@ class SystemConfig(BaseSettings):
         title="商城配置",
         description="商城订单超时、自动收货、保证金与微信支付配置。",
     )
+    compliance: ComplianceConfig = Field(
+        default_factory=ComplianceConfig,
+        title="合规配置",
+        description="网站主体、协议版本、材料留存与敏感字段加密配置。",
+    )
 
     model_config = SettingsConfigDict(case_sensitive=False, extra="ignore")
 
@@ -157,6 +163,7 @@ global_config = GlobalConfig()
 __all__ = [
     "AppConfig",
     "AuthConfig",
+    "ComplianceConfig",
     "DatabaseConfig",
     "FilesConfig",
     "GlobalConfig",

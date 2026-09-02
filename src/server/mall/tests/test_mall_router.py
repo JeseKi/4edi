@@ -18,6 +18,11 @@ from src.server.mall.schemas import OrderPreviewOut, OrderOut
 from src.server.auth.models import User
 
 from src.server.auth.tests._auth_router_helpers import _auth_headers
+from src.server.mall.tests._compliance_helpers import (
+    complete_shop_onboarding,
+    shop_application_payload,
+    shop_review_payload,
+)
 
 
 def test_internal_seed_shop_can_omit_application_documents(test_db_session):
@@ -77,19 +82,16 @@ def _seed_shop_and_goods(test_client, *, seller_headers, admin_headers):
     """申请店铺 → 管理员审核 → 创建商品并上架。返回 (shop_id, goods_id, sku_id)。"""
     resp = test_client.post(
         "/api/mall/seller/shop/apply",
-        json={"name": "测试旗舰店", "description": "自动化测试店铺", "real_name": "测试商家", "identity_number": "110101199001011234", "business_license_asset_id": "license", "identity_front_asset_id": "id-front", "identity_back_asset_id": "id-back"},
+        json=shop_application_payload(test_client, seller_headers, name="测试旗舰店"),
         headers=seller_headers,
     )
     assert resp.status_code == 201, resp.text
     shop_id = resp.json()["id"]
 
-    resp = test_client.post(
-        f"/api/mall/admin/shops/{shop_id}/review",
-        json={"approved": True},
-        headers=admin_headers,
+    shop = complete_shop_onboarding(
+        test_client, seller_headers, admin_headers, shop_id
     )
-    assert resp.status_code == 200, resp.text
-    assert resp.json()["status"] == "approved"
+    assert shop["status"] == "approved"
 
     resp = test_client.post(
         "/api/mall/seller/goods",
@@ -672,12 +674,12 @@ def test_shop_review_and_close(test_client, init_test_database):
 
     resp = test_client.post(
         "/api/mall/seller/shop/apply",
-        json={"name": "待审核店铺", "real_name": "测试商家", "identity_number": "110101199001011234", "business_license_asset_id": "license", "identity_front_asset_id": "id-front", "identity_back_asset_id": "id-back"},
+        json=shop_application_payload(test_client, seller_headers, name="待审核店铺"),
         headers=seller_headers,
     )
     assert resp.status_code == 201, resp.text
     assert resp.json()["real_name"] == "测试商家"
-    assert resp.json()["business_license_asset_id"] == "license"
+    assert resp.json()["business_license_asset_id"]
     shop_id = resp.json()["id"]
 
     # 审核通过前不能创建商品
@@ -691,12 +693,12 @@ def test_shop_review_and_close(test_client, init_test_database):
         },
         headers=seller_headers,
     )
-    assert resp.status_code == 400, resp.text
+    assert resp.status_code == 403, resp.text
 
     # 管理员拒绝
     resp = test_client.post(
         f"/api/mall/admin/shops/{shop_id}/review",
-        json={"approved": False, "reject_reason": "资料不全"},
+        json=shop_review_payload(test_client, admin_headers, approved=False),
         headers=admin_headers,
     )
     assert resp.status_code == 200, resp.text
@@ -705,19 +707,25 @@ def test_shop_review_and_close(test_client, init_test_database):
     # 重新申请应失败（已申请过）
     resp = test_client.post(
         "/api/mall/seller/shop/apply",
-        json={"name": "再次申请", "real_name": "测试商家", "identity_number": "110101199001011234", "business_license_asset_id": "license", "identity_front_asset_id": "id-front", "identity_back_asset_id": "id-back"},
+        json=shop_application_payload(
+            test_client, seller_headers, name="再次申请", credit_seed="再次申请"
+        ),
         headers=seller_headers,
     )
     assert resp.status_code == 400, resp.text
 
-    # 审核通过后关闭店铺
     resp = test_client.post(
-        f"/api/mall/admin/shops/{shop_id}/review",
-        json={"approved": True},
-        headers=admin_headers,
+        "/api/mall/seller/shop/qualification/resubmit",
+        json=shop_application_payload(test_client, seller_headers, name="待审核店铺"),
+        headers=seller_headers,
     )
     assert resp.status_code == 200, resp.text
-    assert resp.json()["status"] == "approved"
+
+    # 完成资质预审、双方签署、协议归档和最终审核后关闭店铺
+    shop = complete_shop_onboarding(
+        test_client, seller_headers, admin_headers, shop_id
+    )
+    assert shop["status"] == "approved"
 
     resp = test_client.post(
         f"/api/mall/admin/shops/{shop_id}/close", headers=admin_headers

@@ -17,7 +17,15 @@ from ..schemas import (
     VerificationCodeRequest,
 )
 from ..service.sms import normalize_mainland_phone
+from ..service import short_transactions
 from .base import router
+
+
+def _client_ip(request: Request) -> str | None:
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",", maxsplit=1)[0].strip()
+    return request.client.host if request.client else None
 
 
 @router.post(
@@ -57,6 +65,10 @@ async def register_user(
         )
 
     def _register(db) -> UserProfile:
+        short_transactions.assert_current_versions(
+            user_agreement_version=user_data.user_agreement_version,
+            privacy_policy_version=user_data.privacy_policy_version,
+        )
         db_user = service.get_user_by_username(db, username=user_data.username)
         if db_user:
             raise HTTPException(
@@ -70,7 +82,16 @@ async def register_user(
         user_create = UserCreate(
             username=user_data.username, email=normalized_email, password=user_data.password
         )
-        return UserProfile.model_validate(service.create_user(db=db, user_data=user_create))
+        user = service.create_user(db=db, user_data=user_create)
+        short_transactions.record_user_acceptances(
+            db,
+            user_id=user.id,
+            user_agreement_version=user_data.user_agreement_version,
+            privacy_policy_version=user_data.privacy_policy_version,
+            client_ip=_client_ip(request),
+            user_agent=request.headers.get("user-agent"),
+        )
+        return UserProfile.model_validate(user)
 
     new_user = await database_executor.run(_register)
     audit_service.attach_user_audit_context(
@@ -160,6 +181,10 @@ async def register_user_with_code(
         )
 
     def _register(db) -> UserProfile:
+        short_transactions.assert_current_versions(
+            user_agreement_version=user_data.user_agreement_version,
+            privacy_policy_version=user_data.privacy_policy_version,
+        )
         db_user = service.get_user_by_username(db, username=user_data.username)
         if db_user:
             raise HTTPException(
@@ -173,7 +198,16 @@ async def register_user_with_code(
         user_create = UserCreate(
             username=user_data.username, email=normalized_email, password=user_data.password
         )
-        return UserProfile.model_validate(service.create_user(db=db, user_data=user_create))
+        user = service.create_user(db=db, user_data=user_create)
+        short_transactions.record_user_acceptances(
+            db,
+            user_id=user.id,
+            user_agreement_version=user_data.user_agreement_version,
+            privacy_policy_version=user_data.privacy_policy_version,
+            client_ip=_client_ip(request),
+            user_agent=request.headers.get("user-agent"),
+        )
+        return UserProfile.model_validate(user)
 
     new_user = await database_executor.run(_register)
     audit_service.attach_user_audit_context(
@@ -262,8 +296,20 @@ async def register_user_with_phone_code(
     )
 
     def _register(db) -> UserProfile:
+        short_transactions.assert_current_versions(
+            user_agreement_version=user_data.user_agreement_version,
+            privacy_policy_version=user_data.privacy_policy_version,
+        )
         new_user = service.register_with_phone(
             db, normalized_phone, user_data.password, user_data.code
+        )
+        short_transactions.record_user_acceptances(
+            db,
+            user_id=new_user.id,
+            user_agreement_version=user_data.user_agreement_version,
+            privacy_policy_version=user_data.privacy_policy_version,
+            client_ip=_client_ip(request),
+            user_agent=request.headers.get("user-agent"),
         )
         return UserProfile.model_validate(new_user)
 

@@ -12,6 +12,10 @@ from src.server.mall.models import UserCouponStatus
 from src.server.mall.schemas import OrderOut
 
 from src.server.auth.tests._auth_router_helpers import _auth_headers
+from src.server.mall.tests._compliance_helpers import (
+    complete_shop_onboarding,
+    shop_application_payload,
+)
 
 
 def _utcnow() -> datetime:
@@ -60,17 +64,12 @@ def _login_admin(test_client):
 def _seed_shop(test_client, *, seller_headers, admin_headers, name="优惠券测试店"):
     resp = test_client.post(
         "/api/mall/seller/shop/apply",
-        json={"name": name, "description": "自动化测试店铺", "real_name": "测试商家", "identity_number": "110101199001011234", "business_license_asset_id": "license", "identity_front_asset_id": "id-front", "identity_back_asset_id": "id-back"},
+        json=shop_application_payload(test_client, seller_headers, name=name),
         headers=seller_headers,
     )
     assert resp.status_code == 201, resp.text
     shop_id = resp.json()["id"]
-    resp = test_client.post(
-        f"/api/mall/admin/shops/{shop_id}/review",
-        json={"approved": True},
-        headers=admin_headers,
-    )
-    assert resp.status_code == 200, resp.text
+    complete_shop_onboarding(test_client, seller_headers, admin_headers, shop_id)
     return shop_id
 
 

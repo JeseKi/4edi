@@ -3,6 +3,7 @@
 
 from .base import router
 from . import login as _login  # noqa: F401
+from . import legal as _legal  # noqa: F401
 from . import password_change as _password_change  # noqa: F401
 from . import password_reset as _password_reset  # noqa: F401
 from . import profile as _profile  # noqa: F401

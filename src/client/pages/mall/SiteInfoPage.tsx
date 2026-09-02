@@ -1,9 +1,11 @@
 import { Link, useParams } from 'react-router-dom'
-import { Button, Card, Result, Typography } from 'antd'
+import { Button, Card, Descriptions, Result, Typography } from 'antd'
 import MarkdownContent from '../../components/common/MarkdownContent'
 import { SITE_INFO_PAGES } from './siteInfoContent'
+import { useRuntimeConfig } from '../../hooks/useRuntimeConfig'
 
 export default function SiteInfoPage() {
+  const { site } = useRuntimeConfig()
   const { key } = useParams<{ key: string }>()
   const page = key ? SITE_INFO_PAGES[key] : undefined
 
@@ -33,6 +35,18 @@ export default function SiteInfoPage() {
         {page.title}
       </Typography.Title>
       <MarkdownContent content={page.html} html />
+      {(key === 'about' || key === 'contact' || key === 'service') && (
+        <Descriptions
+          className="mt-6"
+          bordered
+          column={1}
+          items={[
+            { key: 'entity', label: '运营主体', children: site.legalEntityName || '请联系平台确认' },
+            { key: 'address', label: '注册地址', children: site.registeredAddress || '请联系平台确认' },
+            { key: 'email', label: '客服邮箱', children: site.serviceEmail || '请联系平台确认' },
+          ]}
+        />
+      )}
     </Card>
   )
 }

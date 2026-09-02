@@ -7,14 +7,26 @@
 
 from __future__ import annotations
 
+from datetime import date, datetime, timedelta, timezone
+
 from fastapi import HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from src.server.auth.models import User
+from src.server.auth.service import short_transactions as auth_transactions
+from src.server.compliance import encrypt_sensitive_value
+from src.server.compliance.config import compliance_config
+from src.server.files.service import short_transactions as file_transactions
 
 from ..constants import INFORMATION_CATEGORIES, category_name
 from ..dao import InformationPostDAO
-from ..models import InformationPost, InformationStatus
+from ..models import (
+    InformationPost,
+    InformationStatus,
+    PublisherVerification,
+    PublisherVerificationStatus,
+)
 
 SORT_CHOICES = ("latest", "hot", "recommended")
 
@@ -73,15 +85,65 @@ def mine_payload(post: InformationPost, username: str) -> dict:
         {
             "status": post.status.value,
             "reject_reason": post.reject_reason,
+            "reviewed_by_user_id": post.reviewed_by_user_id,
+            "reviewed_at": post.reviewed_at,
+            "withdrawn_at": post.withdrawn_at,
+            "withdrawn_reason": post.withdrawn_reason,
         }
     )
     return data
 
 
-def admin_item_payload(post: InformationPost, username: str) -> dict:
+def admin_item_payload(
+    post: InformationPost,
+    username: str,
+    verification: PublisherVerification | None = None,
+) -> dict:
     data = mine_payload(post, username)
     data["poster_user_id"] = post.poster_user_id
+    data.update(
+        {
+            "publisher_verification_id": post.publisher_verification_id,
+            "publisher_real_name": getattr(verification, "real_name", None),
+            "publisher_document_number_masked": getattr(
+                verification, "document_number_masked", None
+            ),
+            "publisher_verification_valid": bool(
+                verification and is_verification_currently_valid(verification)
+            ),
+        }
+    )
     return data
+
+
+def is_verification_currently_valid(verification: PublisherVerification) -> bool:
+    return bool(
+        verification.status == PublisherVerificationStatus.APPROVED
+        and (
+            verification.document_long_term
+            or (
+                verification.document_valid_until is not None
+                and verification.document_valid_until >= date.today()
+            )
+        )
+    )
+
+
+def _current_verification(db: Session, user_id: int) -> PublisherVerification | None:
+    rows = (
+        db.query(PublisherVerification)
+        .filter(
+            PublisherVerification.user_id == user_id,
+            PublisherVerification.status == PublisherVerificationStatus.APPROVED,
+            or_(
+                PublisherVerification.document_long_term.is_(True),
+                PublisherVerification.document_valid_until >= date.today(),
+            ),
+        )
+        .order_by(PublisherVerification.reviewed_at.desc(), PublisherVerification.id.desc())
+        .all()
+    )
+    return rows[0] if rows else None
 
 
 def list_categories() -> list[dict]:
@@ -96,6 +158,10 @@ def list_categories() -> list[dict]:
 
 
 def create_post(db: Session, user_id: int, payload: dict) -> InformationPost:
+    auth_transactions.assert_current_user_acceptances(db, user_id)
+    verification = _current_verification(db, user_id)
+    if verification is None:
+        raise HTTPException(status_code=403, detail="请先完成并通过发布者实名认证")
     title = (payload.get("title") or "").strip()
     content = (payload.get("content") or "").strip()
     category = payload.get("category") or ""
@@ -108,6 +174,9 @@ def create_post(db: Session, user_id: int, payload: dict) -> InformationPost:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="详情内容不能为空")
     if not contact_name:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="联系人不能为空")
+    contact_phone = (payload.get("contact_phone") or "").strip()
+    if not contact_phone:
+        raise HTTPException(status_code=400, detail="联系电话不能为空")
 
     dao = InformationPostDAO(db)
     return dao.create(
@@ -117,8 +186,9 @@ def create_post(db: Session, user_id: int, payload: dict) -> InformationPost:
         contact_name=contact_name,
         poster_user_id=user_id,
         price=(payload.get("price") or "").strip() or None,
-        contact_phone=(payload.get("contact_phone") or "").strip() or None,
+        contact_phone=contact_phone,
         attributes=payload.get("attributes"),
+        publisher_verification_id=verification.id,
     )
 
 
@@ -145,7 +215,15 @@ def list_public(
 def get_public_detail(db: Session, post_id: int) -> dict | None:
     dao = InformationPostDAO(db)
     post = dao.get(post_id)
-    if post is None or post.status != InformationStatus.APPROVED:
+    if (
+        post is None
+        or post.status != InformationStatus.APPROVED
+        or post.withdrawn_at is not None
+        or post.publisher_verification_id is None
+    ):
+        return None
+    verification = db.get(PublisherVerification, post.publisher_verification_id)
+    if verification is None or not is_verification_currently_valid(verification):
         return None
     post = dao.increment_view_count(post)
     username = _usernames(db, {post.poster_user_id}).get(post.poster_user_id, "用户")
@@ -166,8 +244,8 @@ def delete_post(db: Session, user_id: int, post_id: int) -> None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="信息不存在")
     if post.poster_user_id != user_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="无权删除他人发布的信息")
-    db.delete(post)
-    db.flush()
+    if post.withdrawn_at is None:
+        dao.withdraw(post, "发布者主动撤回")
 
 
 def admin_list(
@@ -183,29 +261,74 @@ def admin_list(
         status=post_status, keyword=keyword, page=page, page_size=page_size
     )
     usernames = _usernames(db, {post.poster_user_id for post in posts})
-    items = [admin_item_payload(post, usernames.get(post.poster_user_id, "用户")) for post in posts]
+    verification_ids = {
+        post.publisher_verification_id for post in posts if post.publisher_verification_id
+    }
+    verifications = {
+        item.id: item
+        for item in db.query(PublisherVerification)
+        .filter(PublisherVerification.id.in_(verification_ids))
+        .all()
+    } if verification_ids else {}
+    items = []
+    for post in posts:
+        verification = (
+            verifications.get(post.publisher_verification_id)
+            if post.publisher_verification_id is not None
+            else None
+        )
+        items.append(
+            admin_item_payload(
+                post, usernames.get(post.poster_user_id, "用户"), verification
+            )
+        )
     return items, total
 
 
+def get_admin_item_payload(db: Session, post: InformationPost) -> dict:
+    username = _usernames(db, {post.poster_user_id}).get(post.poster_user_id, "用户")
+    verification = (
+        db.get(PublisherVerification, post.publisher_verification_id)
+        if post.publisher_verification_id is not None
+        else None
+    )
+    return admin_item_payload(post, username, verification)
+
+
 def admin_review(
-    db: Session, post_id: int, *, approved: bool, reject_reason: str | None
+    db: Session,
+    post_id: int,
+    *,
+    approved: bool,
+    reject_reason: str | None,
+    reviewer_user_id: int,
 ) -> InformationPost:
     dao = InformationPostDAO(db)
     post = dao.get(post_id)
     if post is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="信息不存在")
     if approved:
+        if post.publisher_verification_id is None:
+            raise HTTPException(status_code=400, detail="信息未关联发布者实名记录")
+        verification = db.get(PublisherVerification, post.publisher_verification_id)
+        if verification is None or not is_verification_currently_valid(verification):
+            raise HTTPException(status_code=400, detail="发布者实名记录已失效，不能通过")
         return dao.update_status(
             post,
             status=InformationStatus.APPROVED,
             reject_reason=None,
             approved=True,
+            reviewer_user_id=reviewer_user_id,
         )
     reason = (reject_reason or "").strip()
     if not reason:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="驳回时必须填写原因")
     return dao.update_status(
-        post, status=InformationStatus.REJECTED, reject_reason=reason, approved=False
+        post,
+        status=InformationStatus.REJECTED,
+        reject_reason=reason,
+        approved=False,
+        reviewer_user_id=reviewer_user_id,
     )
 
 
@@ -215,3 +338,239 @@ def admin_toggle_top(db: Session, post_id: int, *, on: bool) -> InformationPost:
     if post is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="信息不存在")
     return dao.set_top(post, on=on)
+
+
+def get_contact(db: Session, post_id: int) -> dict | None:
+    post = InformationPostDAO(db).get(post_id)
+    if (
+        post is None
+        or post.status != InformationStatus.APPROVED
+        or post.withdrawn_at is not None
+        or post.publisher_verification_id is None
+        or not post.contact_phone
+    ):
+        return None
+    verification = db.get(PublisherVerification, post.publisher_verification_id)
+    if verification is None or not is_verification_currently_valid(verification):
+        return None
+    return {"contact_name": post.contact_name, "contact_phone": post.contact_phone}
+
+
+def _mask_document_number(value: str) -> str:
+    normalized = "".join(value.strip().upper().split())
+    if len(normalized) <= 7:
+        return normalized[:1] + "*" * max(0, len(normalized) - 2) + normalized[-1:]
+    return f"{normalized[:3]}{'*' * (len(normalized) - 7)}{normalized[-4:]}"
+
+
+def verification_payload(
+    verification: PublisherVerification,
+    *,
+    username: str,
+    reviewer_username: str | None,
+) -> dict:
+    return {
+        "id": verification.id,
+        "user_id": verification.user_id,
+        "username": username,
+        "real_name": verification.real_name,
+        "document_type": verification.document_type,
+        "document_number_masked": verification.document_number_masked,
+        "document_front_asset_id": verification.document_front_asset_id,
+        "document_back_asset_id": verification.document_back_asset_id,
+        "document_valid_until": verification.document_valid_until,
+        "document_long_term": verification.document_long_term,
+        "status": verification.status,
+        "submitted_at": verification.submitted_at,
+        "reviewer_user_id": verification.reviewer_user_id,
+        "reviewer_username": reviewer_username,
+        "reviewed_at": verification.reviewed_at,
+        "reject_reason": verification.reject_reason,
+        "is_currently_valid": is_verification_currently_valid(verification),
+    }
+
+
+def submit_verification(db: Session, user_id: int, payload: dict) -> PublisherVerification:
+    auth_transactions.assert_current_user_acceptances(db, user_id)
+    pending = (
+        db.query(PublisherVerification.id)
+        .filter(
+            PublisherVerification.user_id == user_id,
+            PublisherVerification.status == PublisherVerificationStatus.PENDING,
+        )
+        .first()
+    )
+    if pending is not None:
+        raise HTTPException(status_code=409, detail="已有待审核的实名申请")
+    document_type = payload["document_type"]
+    back_asset_id = payload.get("document_back_asset_id")
+    if document_type == "resident_identity_card" and not back_asset_id:
+        raise HTTPException(status_code=422, detail="居民身份证必须上传正反面")
+    long_term = bool(payload.get("document_long_term"))
+    valid_until = payload.get("document_valid_until")
+    if not long_term and valid_until is None:
+        raise HTTPException(status_code=422, detail="请填写证件有效期或选择长期有效")
+    if valid_until is not None and valid_until < date.today():
+        raise HTTPException(status_code=422, detail="证件已过期")
+    asset_ids = [payload["document_front_asset_id"]]
+    if back_asset_id:
+        asset_ids.append(back_asset_id)
+    file_transactions.assert_owned_available_assets(
+        db, owner_user_id=user_id, asset_ids=asset_ids, compliance_material=True
+    )
+    number = payload["document_number"].strip().upper()
+    verification = PublisherVerification(
+        user_id=user_id,
+        real_name=payload["real_name"].strip(),
+        document_type=document_type,
+        document_number_encrypted=encrypt_sensitive_value(number),
+        document_number_masked=_mask_document_number(number),
+        document_front_asset_id=asset_ids[0],
+        document_back_asset_id=back_asset_id,
+        document_valid_until=None if long_term else valid_until,
+        document_long_term=long_term,
+        status=PublisherVerificationStatus.PENDING,
+    )
+    db.add(verification)
+    db.flush()
+    file_transactions.attach_asset_reference(
+        db,
+        asset_id=verification.document_front_asset_id,
+        resource_type="publisher_verification",
+        resource_id=verification.id,
+        purpose="document_front",
+    )
+    if verification.document_back_asset_id:
+        file_transactions.attach_asset_reference(
+            db,
+            asset_id=verification.document_back_asset_id,
+            resource_type="publisher_verification",
+            resource_id=verification.id,
+            purpose="document_back",
+        )
+    return verification
+
+
+def list_my_verifications(db: Session, user_id: int) -> list[dict]:
+    rows = (
+        db.query(PublisherVerification)
+        .filter(PublisherVerification.user_id == user_id)
+        .order_by(PublisherVerification.submitted_at.desc(), PublisherVerification.id.desc())
+        .all()
+    )
+    username = _usernames(db, {user_id}).get(user_id, "用户")
+    reviewer_ids = {row.reviewer_user_id for row in rows if row.reviewer_user_id}
+    reviewers = _usernames(db, reviewer_ids)
+    return [
+        verification_payload(
+            row,
+            username=username,
+            reviewer_username=(
+                reviewers.get(row.reviewer_user_id)
+                if row.reviewer_user_id is not None
+                else None
+            ),
+        )
+        for row in rows
+    ]
+
+
+def admin_list_verifications(
+    db: Session,
+    *,
+    verification_status: PublisherVerificationStatus | None,
+    keyword: str | None,
+    page: int,
+    page_size: int,
+) -> tuple[list[dict], int]:
+    query = db.query(PublisherVerification, User.username).join(
+        User, User.id == PublisherVerification.user_id
+    )
+    if verification_status is not None:
+        query = query.filter(PublisherVerification.status == verification_status)
+    if keyword:
+        pattern = f"%{keyword}%"
+        query = query.filter(
+            or_(User.username.ilike(pattern), PublisherVerification.real_name.ilike(pattern))
+        )
+    total = query.count()
+    rows = (
+        query.order_by(PublisherVerification.submitted_at.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    reviewer_ids = {item.reviewer_user_id for item, _ in rows if item.reviewer_user_id}
+    reviewers = _usernames(db, reviewer_ids)
+    return [
+        verification_payload(
+            item,
+            username=username,
+            reviewer_username=(
+                reviewers.get(item.reviewer_user_id)
+                if item.reviewer_user_id is not None
+                else None
+            ),
+        )
+        for item, username in rows
+    ], total
+
+
+def get_verification_payload(db: Session, verification_id: int) -> dict:
+    verification = db.get(PublisherVerification, verification_id)
+    if verification is None:
+        raise HTTPException(status_code=404, detail="实名申请不存在")
+    usernames = _usernames(
+        db,
+        {verification.user_id}
+        | ({verification.reviewer_user_id} if verification.reviewer_user_id else set()),
+    )
+    return verification_payload(
+        verification,
+        username=usernames.get(verification.user_id, "用户"),
+        reviewer_username=(
+            usernames.get(verification.reviewer_user_id)
+            if verification.reviewer_user_id is not None
+            else None
+        ),
+    )
+
+
+def review_verification(
+    db: Session,
+    verification_id: int,
+    *,
+    approved: bool,
+    reject_reason: str | None,
+    reviewer_user_id: int,
+) -> PublisherVerification:
+    verification = db.get(PublisherVerification, verification_id)
+    if verification is None:
+        raise HTTPException(status_code=404, detail="实名申请不存在")
+    if verification.status != PublisherVerificationStatus.PENDING:
+        raise HTTPException(status_code=400, detail="实名申请已审核")
+    if approved:
+        if not verification.document_long_term and (
+            verification.document_valid_until is None
+            or verification.document_valid_until < date.today()
+        ):
+            raise HTTPException(status_code=400, detail="证件已过期，不能通过")
+        verification.status = PublisherVerificationStatus.APPROVED
+        verification.reject_reason = None
+    else:
+        reason = (reject_reason or "").strip()
+        if not reason:
+            raise HTTPException(status_code=400, detail="驳回时必须填写原因")
+        verification.status = PublisherVerificationStatus.REJECTED
+        verification.reject_reason = reason
+        file_transactions.release_asset_references(
+            db,
+            resource_type="publisher_verification",
+            resource_id=verification.id,
+            retain_until=datetime.now(timezone.utc)
+            + timedelta(days=compliance_config.material_retention_days),
+        )
+    verification.reviewer_user_id = reviewer_user_id
+    verification.reviewed_at = datetime.now(timezone.utc)
+    db.flush()
+    return verification

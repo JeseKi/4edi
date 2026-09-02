@@ -46,6 +46,54 @@ def test_register_and_login_flow(test_client, test_db_session: Session):
     )
     assert RefreshTokenDAO(test_db_session).get_by_jti(payload["jti"]) is not None
 
+
+def test_registration_requires_explicit_current_legal_versions(test_client):
+    email = "legal-required@example.com"
+    sent = test_client.post("/api/auth/send-verification-code", json={"email": email})
+    assert sent.status_code == 200, sent.text
+    code = service.verification_codes[email]["code"]
+
+    missing = test_client.post(
+        "/api/auth/register-with-code",
+        headers={"X-Test-Omit-Legal-Versions": "1"},
+        json={
+            "username": "legal_required",
+            "email": email,
+            "password": "Password123",
+            "code": code,
+        },
+    )
+    assert missing.status_code == 422, missing.text
+
+    stale = test_client.post(
+        "/api/auth/register-with-code",
+        headers={"X-Test-Omit-Legal-Versions": "1"},
+        json={
+            "username": "legal_required",
+            "email": email,
+            "password": "Password123",
+            "code": code,
+            "user_agreement_version": "2025-01-01",
+            "privacy_policy_version": "2025-01-01",
+        },
+    )
+    assert stale.status_code == 422, stale.text
+
+
+def test_legal_documents_are_public_and_versioned(test_client):
+    response = test_client.get("/api/auth/legal-documents")
+    assert response.status_code == 200, response.text
+    documents = response.json()
+    assert {item["document_type"] for item in documents} == {
+        "user_agreement",
+        "privacy_policy",
+        "merchant_agreement",
+    }
+    assert all(item["version"] == "2026-09-02" for item in documents)
+    assert all("演示项目" not in item["content_markdown"] for item in documents)
+    assert all("{{service_phone}}" not in item["content_markdown"] for item in documents)
+    assert all("客服电话" not in item["content_markdown"] for item in documents)
+
 def test_login_wrong_password(test_client, init_test_database):
     resp = test_client.post(
         "/api/auth/login", json={"username": "admin", "password": "wrong"}

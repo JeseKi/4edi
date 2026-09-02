@@ -21,6 +21,7 @@ from typing import TypedDict
 from sqlalchemy import text
 
 from src.server.auth.dao import UserDAO
+from src.server.config import global_config
 from src.server.auth.dependencies.current_user import AuthenticatedPrincipal
 from src.server.auth.models import User
 from src.server.auth.schemas import UserRole
@@ -41,6 +42,9 @@ from src.server.mall.models import Goods, GoodsStatus, OrderStatus, Shop, ShopSt
 from src.server.mall.service import short_transactions as service
 from src.server.information.dao import InformationPostDAO
 from src.server.information.models import InformationPost, InformationStatus
+
+if global_config.app.env not in {"dev", "test"}:
+    raise SystemExit("商城演示 Seed 仅允许在 dev/test 环境运行")
 
 
 class GoodsSeed(TypedDict):

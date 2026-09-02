@@ -86,3 +86,11 @@ a {
 .notification-markdown :not(pre) > code { border-radius: 4px; padding: .1em .35em; background: color-mix(in srgb, var(--app-text-secondary) 14%, transparent); } .notification-markdown pre { margin: .65em 0; overflow-x: auto; border: 1px solid var(--app-border-color); border-radius: 6px; padding: 12px; background: var(--app-surface-muted); }
 .notification-inbox-layout { display: grid; grid-template-columns: minmax(280px, 38%) 1fr; min-height: 540px; } .notification-inbox-list { border-right: 1px solid var(--app-border-color); overflow: auto; } .notification-inbox-detail { padding: 28px 32px; overflow: auto; } .notification-row-selected { background: var(--app-surface-muted); } .notification-row-preview { margin-top: 4px; color: var(--app-text-secondary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media (max-width: 767px) { .notification-inbox-layout { display: block; min-height: 0; } .notification-inbox-detail { display: none; } .notification-inbox-list { border-right: 0; } }
+
+.agreement-print-shell { min-height: 100vh; padding: 24px; background: #eef1f5; color: #111827; }
+.agreement-print-loading { min-height: 100vh; display: flex; align-items: center; justify-content: center; background: #eef1f5; }
+.agreement-print-actions { max-width: 210mm; margin: 0 auto 16px; display: flex; align-items: center; gap: 16px; color: #475569; }
+.agreement-print-paper { width: 210mm; min-height: 297mm; margin: 0 auto; box-sizing: border-box; padding: 20mm 18mm; background: #fff; box-shadow: 0 8px 28px rgba(15, 23, 42, .12); }
+.agreement-print-paper .notification-markdown { color: #111827; font-size: 14px; line-height: 1.8; }
+@media (max-width: 860px) { .agreement-print-shell { padding: 12px; } .agreement-print-paper { width: 100%; min-height: auto; padding: 24px; } .agreement-print-actions { align-items: flex-start; flex-direction: column; } }
+@media print { @page { size: A4; margin: 18mm; } .agreement-print-shell { min-height: 0; padding: 0; background: #fff; } .agreement-print-actions { display: none; } .agreement-print-paper { width: auto; min-height: 0; margin: 0; padding: 0; box-shadow: none; } }

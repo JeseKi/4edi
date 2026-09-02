@@ -5,10 +5,20 @@ import {
   type TurnstileRuntimeConfig,
 } from '../contexts/RuntimeConfigContext'
 import { fetchFrontendConfig } from '../lib/runtimeConfig'
+import type { SiteRuntimeConfig } from '../lib/runtimeConfig'
 
 const fallbackTurnstileConfig: TurnstileRuntimeConfig = {
   enabled: Boolean((import.meta.env.VITE_TURNSTILE_SITE_KEY ?? '').trim()),
   siteKey: (import.meta.env.VITE_TURNSTILE_SITE_KEY ?? '').trim(),
+}
+
+const fallbackSiteConfig: SiteRuntimeConfig = {
+  siteName: '沐泽健康',
+  legalEntityName: '',
+  registeredAddress: '',
+  serviceEmail: '',
+  icpRecordNumber: '',
+  configurationComplete: false,
 }
 
 export function RuntimeConfigProvider({ children }: { children: ReactNode }) {
@@ -16,6 +26,7 @@ export function RuntimeConfigProvider({ children }: { children: ReactNode }) {
   const [turnstile, setTurnstile] = useState<TurnstileRuntimeConfig>(fallbackTurnstileConfig)
   const [features, setFeatures] = useState<string[]>([])
   const [trustedNotificationOrigins, setTrustedNotificationOrigins] = useState<string[]>([])
+  const [site, setSite] = useState<SiteRuntimeConfig>(fallbackSiteConfig)
 
   useEffect(() => {
     let alive = true
@@ -26,6 +37,15 @@ export function RuntimeConfigProvider({ children }: { children: ReactNode }) {
         if (alive) {
           setFeatures(config?.features ?? [])
           setTrustedNotificationOrigins(config?.notifications?.trusted_external_origins ?? [])
+          const rawSite = config?.site
+          setSite({
+            siteName: rawSite?.site_name ?? fallbackSiteConfig.siteName,
+            legalEntityName: rawSite?.legal_entity_name ?? '',
+            registeredAddress: rawSite?.registered_address ?? '',
+            serviceEmail: rawSite?.service_email ?? '',
+            icpRecordNumber: rawSite?.icp_record_number ?? '',
+            configurationComplete: rawSite?.configuration_complete ?? false,
+          })
         }
         const devTurnstile = config?.turnstile
         if (!alive || !devTurnstile) {
@@ -59,8 +79,9 @@ export function RuntimeConfigProvider({ children }: { children: ReactNode }) {
       turnstile,
       features,
       trustedNotificationOrigins,
+      site,
     }),
-    [features, loading, trustedNotificationOrigins, turnstile],
+    [features, loading, site, trustedNotificationOrigins, turnstile],
   )
 
   return (

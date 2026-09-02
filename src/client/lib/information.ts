@@ -6,6 +6,8 @@ import type {
   InformationMinePost,
   InformationPage,
   InformationPostDetail,
+  PublisherVerification,
+  PublisherVerificationStatus,
 } from './types'
 
 // ---------------------------------------------------------------------------
@@ -42,7 +44,7 @@ export interface InformationCreatePayload {
   title: string
   price?: string
   contact_name: string
-  contact_phone?: string
+  contact_phone: string
   content: string
   attributes?: Record<string, string>
 }
@@ -55,6 +57,25 @@ export const listMyInformation = async (): Promise<InformationMinePost[]> =>
 
 export const deleteInformation = async (postId: number): Promise<{ deleted: boolean }> =>
   (await api.delete<{ deleted: boolean }>(`/information/${postId}`)).data
+
+export const getInformationContact = async (postId: number): Promise<{
+  contact_name: string
+  contact_phone: string
+}> => (await api.get(`/information/${postId}/contact`)).data
+
+export const listMyPublisherVerifications = async (): Promise<PublisherVerification[]> =>
+  (await api.get<PublisherVerification[]>('/information/verification/me')).data
+
+export const submitPublisherVerification = async (payload: {
+  real_name: string
+  document_type: string
+  document_number: string
+  document_front_asset_id: string
+  document_back_asset_id?: string
+  document_valid_until?: string
+  document_long_term: boolean
+}): Promise<PublisherVerification> =>
+  (await api.post<PublisherVerification>('/information/verification', payload)).data
 
 // ---------------------------------------------------------------------------
 // 管理员：信息审核
@@ -101,3 +122,17 @@ export const adminToggleInformationTop = async (
       { params: { on } },
     )
   ).data
+
+export const adminListPublisherVerifications = async (params: {
+  status?: PublisherVerificationStatus
+  keyword?: string
+  page?: number
+  page_size?: number
+}): Promise<{ items: PublisherVerification[]; total: number; page: number; page_size: number }> =>
+  (await api.get('/information/admin/verifications', { params })).data
+
+export const adminReviewPublisherVerification = async (
+  verificationId: number,
+  payload: { approved: boolean; reject_reason?: string },
+): Promise<PublisherVerification> =>
+  (await api.post(`/information/admin/verifications/${verificationId}/review`, payload)).data

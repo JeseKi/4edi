@@ -15,7 +15,7 @@ from fastapi import (
     Security,
     status,
 )
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from src.server.auth.dependencies.admin import get_current_admin
@@ -25,6 +25,13 @@ from src.server.auth.dependencies.current_user import (
 )
 from src.server.auth.service.scopes import SCOPE_PROFILE_READ
 from src.server.database_executor import DatabaseExecutor, get_database_executor
+from src.server.files.storage import (
+    FileObjectNotFoundError,
+    FileStorageError,
+    LocalFileStorage,
+    S3FileStorage,
+    get_file_storage,
+)
 from src.server.task_runtime import TaskRuntime, get_task_runtime
 
 from . import service
@@ -53,6 +60,7 @@ from .schemas import (
     CouponTemplateCreateIn,
     CouponTemplateOut,
     CouponTemplateUpdateIn,
+    ComplianceSummaryOut,
     EvaluationAppendIn,
     EvaluationCreateIn,
     EvaluationOut,
@@ -81,10 +89,15 @@ from .schemas import (
     RefundOut,
     RefundRejectIn,
     ReturnTrackingIn,
+    MerchantAgreementSignIn,
+    PlatformAgreementSignIn,
     ShopApply,
+    ShopAgreementOut,
+    ShopAdminDetailOut,
     ShopOut,
     ShopPublicOut,
     ShopReviewIn,
+    ShopQualificationReviewOut,
     ShopUpdate,
     ShipOrderIn,
     UserCouponOut,
@@ -1234,14 +1247,9 @@ async def apply_shop(
         shop = service.apply_shop(
             db,
             current_user,
-            name=payload.name,
-            description=payload.description,
-            avatar=payload.avatar,
-            real_name=payload.real_name,
-            identity_number=payload.identity_number,
-            business_license_asset_id=payload.business_license_asset_id,
-            identity_front_asset_id=payload.identity_front_asset_id,
-            identity_back_asset_id=payload.identity_back_asset_id,
+            payload.model_dump(),
+            client_ip=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
         )
         from src.server.audit import service as audit_service
 
@@ -1257,6 +1265,40 @@ async def apply_shop(
     return await database_executor.run(_apply)
 
 
+@seller_router.post(
+    "/shop/qualification/resubmit",
+    summary="重新提交店铺资质",
+    response_model=ShopOut,
+)
+async def resubmit_shop_qualification(
+    request: Request,
+    payload: ShopApply,
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _resubmit(db):
+        shop = service.resubmit_shop_qualification(
+            db,
+            current_user,
+            payload.model_dump(),
+            client_ip=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+        from src.server.audit import service as audit_service
+
+        audit_service.attach_audit_context(
+            request.state,
+            priority="high",
+            action="mall.shop.qualification.resubmit",
+            resource_type="shop",
+            resource_id=shop.id,
+            target_summary=shop.name,
+        )
+        return ShopOut.model_validate(shop)
+
+    return await database_executor.run(_resubmit)
+
+
 @seller_router.get("/shop", summary="我的店铺", response_model=ShopOut)
 async def get_my_shop(
     current_user: AuthenticatedPrincipal = Depends(_require_login),
@@ -1265,6 +1307,88 @@ async def get_my_shop(
     return await database_executor.run(
         lambda db: ShopOut.model_validate(service.get_my_shop(db, current_user))
     )
+
+
+@seller_router.get(
+    "/shop/agreement",
+    summary="查看当前商家入驻协议定稿",
+    response_model=ShopAgreementOut,
+)
+async def get_my_shop_agreement(
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    return await database_executor.run(
+        lambda db: ShopAgreementOut.model_validate(
+            service.get_my_shop_agreement(db, current_user)
+        )
+    )
+
+
+@seller_router.get(
+    "/shop/agreement/signed-file",
+    summary="下载当前商家的双方签署协议",
+)
+async def download_my_shop_signed_agreement(
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    snapshot = await database_executor.run(
+        lambda db: service.get_my_shop_signed_agreement_snapshot(db, current_user)
+    )
+    storage = get_file_storage()
+    if snapshot.storage_driver != storage.driver:
+        raise HTTPException(status_code=409, detail="文件存储配置已变更，无法下载")
+    try:
+        if isinstance(storage, LocalFileStorage):
+            return FileResponse(
+                storage.path_for_download(snapshot.storage_key),
+                media_type=snapshot.content_type,
+                filename=snapshot.original_filename,
+                content_disposition_type="attachment",
+            )
+        if isinstance(storage, S3FileStorage):
+            return RedirectResponse(
+                storage.download_url(snapshot.storage_key, snapshot.original_filename),
+                status_code=307,
+            )
+    except FileObjectNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="双方签署协议文件不存在") from exc
+    raise HTTPException(status_code=500, detail="不支持的文件存储驱动")
+
+
+@seller_router.post(
+    "/shop/agreement/merchant-sign",
+    summary="商家提交已签署协议",
+    response_model=ShopOut,
+)
+async def merchant_sign_shop_agreement(
+    request: Request,
+    payload: MerchantAgreementSignIn,
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _sign(db):
+        shop = service.merchant_sign_shop_agreement(
+            db,
+            current_user,
+            payload.model_dump(),
+            client_ip=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+        from src.server.audit import service as audit_service
+
+        audit_service.attach_audit_context(
+            request.state,
+            priority="high",
+            action="mall.shop.agreement.merchant_sign",
+            resource_type="shop",
+            resource_id=shop.id,
+            target_summary=shop.name,
+        )
+        return ShopOut.model_validate(shop)
+
+    return await database_executor.run(_sign)
 
 
 @seller_router.put("/shop", summary="更新店铺", response_model=ShopOut)
@@ -1865,6 +1989,7 @@ async def seller_list_conversations(
 async def admin_list_shops(
     shop_status: Literal["pending", "approved", "rejected", "closed"] | None = Query(default=None, alias="status"),
     keyword: str | None = Query(default=None),
+    qualification_state: Literal["expiring_soon", "expired"] | None = Query(default=None),
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
     _: AuthenticatedPrincipal = Security(get_current_admin),
@@ -1873,7 +1998,12 @@ async def admin_list_shops(
     def _list(db):
         status_filter = ShopStatus(shop_status) if shop_status else None
         shops, total = service.admin_list_shops(
-            db, status_filter=status_filter, keyword=keyword, page=page, page_size=page_size
+            db,
+            status_filter=status_filter,
+            qualification_state=qualification_state,
+            keyword=keyword,
+            page=page,
+            page_size=page_size,
         )
         return {
             "items": [ShopOut.model_validate(s) for s in shops],
@@ -1885,7 +2015,37 @@ async def admin_list_shops(
     return await database_executor.run(_list)
 
 
-@admin_router.post("/shops/{shop_id}/review", summary="审核店铺", response_model=ShopOut)
+@admin_router.get(
+    "/compliance-summary", summary="合规待办汇总", response_model=ComplianceSummaryOut
+)
+async def admin_compliance_summary(
+    _: AuthenticatedPrincipal = Security(get_current_admin),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    return await database_executor.run(service.compliance_summary)
+
+
+@admin_router.get(
+    "/shops/{shop_id}", summary="店铺资质详情", response_model=ShopAdminDetailOut
+)
+async def admin_shop_detail(
+    shop_id: int,
+    _: AuthenticatedPrincipal = Security(get_current_admin),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _detail(db):
+        shop, reviews = service.admin_shop_detail(db, shop_id)
+        return {
+            "shop": ShopOut.model_validate(shop),
+            "qualification_reviews": [
+                ShopQualificationReviewOut.model_validate(review) for review in reviews
+            ],
+        }
+
+    return await database_executor.run(_detail)
+
+
+@admin_router.post("/shops/{shop_id}/review", summary="店铺资质预审", response_model=ShopOut)
 async def admin_review_shop(
     request: Request,
     shop_id: int,
@@ -1897,15 +2057,14 @@ async def admin_review_shop(
         shop = service.admin_review_shop(
             db,
             shop_id,
-            approved=payload.approved,
-            reject_reason=payload.reject_reason,
+            payload=payload.model_dump(),
             handler_user_id=current_admin.user_id,
         )
         from src.server.audit import service as audit_service
 
         audit_service.attach_audit_context(
             request.state,
-            action="mall.shop.review",
+            action="mall.shop.qualification.pre_review",
             resource_type="shop",
             resource_id=shop.id,
             target_summary=shop.name,
@@ -1913,6 +2072,148 @@ async def admin_review_shop(
         return ShopOut.model_validate(shop)
 
     return await database_executor.run(_review)
+
+
+@admin_router.post(
+    "/shops/{shop_id}/agreement/generate",
+    summary="生成商家入驻协议定稿",
+    response_model=ShopAgreementOut,
+)
+async def admin_generate_shop_agreement(
+    request: Request,
+    shop_id: int,
+    current_admin: AuthenticatedPrincipal = Security(get_current_admin),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _generate(db):
+        agreement = service.admin_generate_shop_agreement(
+            db, shop_id, handler_user_id=current_admin.user_id
+        )
+        from src.server.audit import service as audit_service
+
+        audit_service.attach_audit_context(
+            request.state,
+            priority="high",
+            action="mall.shop.agreement.generate",
+            resource_type="shop_agreement",
+            resource_id=agreement.id,
+            target_summary=agreement.agreement_number,
+        )
+        return ShopAgreementOut.model_validate(agreement)
+
+    return await database_executor.run(_generate)
+
+
+@admin_router.post(
+    "/shops/{shop_id}/agreement/platform-sign",
+    summary="平台提交双方签署协议",
+    response_model=ShopOut,
+)
+async def admin_platform_sign_shop_agreement(
+    request: Request,
+    shop_id: int,
+    payload: PlatformAgreementSignIn,
+    current_admin: AuthenticatedPrincipal = Security(get_current_admin),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _sign(db):
+        shop = service.admin_platform_sign_shop_agreement(
+            db,
+            shop_id,
+            payload.model_dump(),
+            handler_user_id=current_admin.user_id,
+        )
+        from src.server.audit import service as audit_service
+
+        audit_service.attach_audit_context(
+            request.state,
+            priority="high",
+            action="mall.shop.agreement.platform_sign",
+            resource_type="shop",
+            resource_id=shop.id,
+            target_summary=shop.name,
+        )
+        return ShopOut.model_validate(shop)
+
+    return await database_executor.run(_sign)
+
+
+@admin_router.post(
+    "/shops/{shop_id}/agreement/archive",
+    summary="归档最终商家入驻协议",
+    response_model=ShopOut,
+)
+async def admin_archive_shop_agreement(
+    request: Request,
+    shop_id: int,
+    current_admin: AuthenticatedPrincipal = Security(get_current_admin),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    snapshot = await database_executor.run(
+        lambda db: service.prepare_shop_agreement_archive(db, shop_id)
+    )
+    storage = get_file_storage()
+    if snapshot.storage_driver != storage.driver:
+        raise HTTPException(status_code=409, detail="文件存储配置已变更，无法归档")
+    try:
+        final_file_sha256 = await asyncio.to_thread(
+            storage.sha256, snapshot.storage_key
+        )
+    except FileObjectNotFoundError as exc:
+        raise HTTPException(status_code=404, detail="最终协议文件对象不存在") from exc
+    except FileStorageError as exc:
+        raise HTTPException(status_code=502, detail="读取最终协议文件失败") from exc
+
+    def _archive(db):
+        shop = service.admin_archive_shop_agreement(
+            db,
+            shop_id,
+            handler_user_id=current_admin.user_id,
+            expected_asset_id=snapshot.id,
+            final_file_sha256=final_file_sha256,
+        )
+        from src.server.audit import service as audit_service
+
+        audit_service.attach_audit_context(
+            request.state,
+            priority="high",
+            action="mall.shop.agreement.archive",
+            resource_type="shop",
+            resource_id=shop.id,
+            target_summary=shop.name,
+            detail={"final_file_sha256": final_file_sha256},
+        )
+        return ShopOut.model_validate(shop)
+
+    return await database_executor.run(_archive)
+
+
+@admin_router.post(
+    "/shops/{shop_id}/approve",
+    summary="最终批准商家入驻",
+    response_model=ShopOut,
+)
+async def admin_approve_shop(
+    request: Request,
+    shop_id: int,
+    _: AuthenticatedPrincipal = Security(get_current_admin),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _approve(db):
+        shop = service.admin_approve_shop(db, shop_id)
+        from src.server.audit import service as audit_service
+
+        audit_service.attach_audit_context(
+            request.state,
+            priority="high",
+            action="mall.shop.approve",
+            resource_type="shop",
+            resource_id=shop.id,
+            target_summary=shop.name,
+        )
+        return ShopOut.model_validate(shop)
+
+    return await database_executor.run(_approve)
 
 
 @admin_router.post("/shops/{shop_id}/close", summary="关闭店铺", response_model=ShopOut)

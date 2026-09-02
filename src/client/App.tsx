@@ -36,10 +36,13 @@ import InformationCenterPage from './pages/mall/information/InformationCenterPag
 import InformationDetailPage from './pages/mall/information/InformationDetailPage'
 import InformationPostPage from './pages/mall/information/InformationPostPage'
 import InformationMinePage from './pages/mall/information/InformationMinePage'
+import PublisherVerificationPage from './pages/mall/information/PublisherVerificationPage'
 import ComplaintPage from './pages/mall/ComplaintPage'
 import InformationAdminPage from './pages/mall/admin/InformationAdminPage'
+import PublisherVerificationAdminPage from './pages/mall/admin/PublisherVerificationAdminPage'
 import SellerLayout from './components/mall/SellerLayout'
 import ShopManagePage from './pages/mall/seller/ShopManagePage'
+import ShopAgreementPrintPage from './pages/mall/seller/ShopAgreementPrintPage'
 import GoodsManagePage from './pages/mall/seller/GoodsManagePage'
 import OrdersManagePage from './pages/mall/seller/OrdersManagePage'
 import RefundManagePage from './pages/mall/seller/RefundManagePage'
@@ -52,8 +55,8 @@ import WithdrawReviewPage from './pages/mall/admin/WithdrawReviewPage'
 import CouponAdminPage from './pages/mall/admin/CouponAdminPage'
 import { AuthProvider, RequireAdmin, RequireAuth } from './providers/AuthProvider'
 import { RuntimeConfigProvider } from './providers/RuntimeConfigProvider'
-import ThemeToggle from './components/theme/ThemeToggle'
 import { useRuntimeConfig } from './hooks/useRuntimeConfig'
+import LegalDocumentPage from './pages/legal/LegalDocumentPage'
 
 function AppRoutes() {
   const { loading, features } = useRuntimeConfig()
@@ -80,6 +83,7 @@ function AppRoutes() {
         />
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
+        <Route path="/legal/:documentKey" element={<LegalDocumentPage />} />
         <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
         <Route path="/profile/password-change/:token" element={<ConfirmPasswordChangePage />} />
         {hasFeature('oauth-provider') && (
@@ -130,6 +134,7 @@ function AppRoutes() {
             <Route path="/mall/information" element={<InformationCenterPage />} />
             <Route path="/mall/information/post" element={<RequireAuth><InformationPostPage /></RequireAuth>} />
             <Route path="/mall/information/mine" element={<RequireAuth><InformationMinePage /></RequireAuth>} />
+            <Route path="/mall/information/verification" element={<RequireAuth><PublisherVerificationPage /></RequireAuth>} />
             <Route path="/mall/information/:postId" element={<InformationDetailPage />} />
             <Route path="/mall/complaint" element={<RequireAuth><ComplaintPage /></RequireAuth>} />
           </Route>
@@ -147,6 +152,9 @@ function AppRoutes() {
           </Route>
         )}
         {hasFeature('mall') && (
+          <Route path="/mall/seller/agreement/print" element={<RequireAuth><ShopAgreementPrintPage /></RequireAuth>} />
+        )}
+        {hasFeature('mall') && (
           <Route path="/mall/admin/shops" element={<RequireAdmin><ShopReviewPage /></RequireAdmin>} />
         )}
         {hasFeature('mall') && (
@@ -158,9 +166,11 @@ function AppRoutes() {
         {hasFeature('information') && (
           <Route path="/mall/admin/information" element={<RequireAdmin><InformationAdminPage /></RequireAdmin>} />
         )}
+        {hasFeature('information') && (
+          <Route path="/mall/admin/publisher-verifications" element={<RequireAdmin><PublisherVerificationAdminPage /></RequireAdmin>} />
+        )}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-      <ThemeToggle />
     </>
   )
 }

@@ -191,6 +191,11 @@ export default function MainLayout() {
                   icon: <SendOutlined />,
                   label: <Link to="/mall/admin/information">信息审核</Link>,
                 },
+                {
+                  key: 'mall-admin-publisher-verifications',
+                  icon: <UserOutlined />,
+                  label: <Link to="/mall/admin/publisher-verifications">发布者实名审核</Link>,
+                },
               ]
             : []),
         )

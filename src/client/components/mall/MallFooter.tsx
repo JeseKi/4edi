@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { useRuntimeConfig } from '../../hooks/useRuntimeConfig'
 
 const MALL_PRIMARY = '#F31947'
 
@@ -11,6 +12,7 @@ const withRef = (to: string) => {
 }
 
 export default function MallFooter() {
+  const { site } = useRuntimeConfig()
   return (
     <footer style={{ color: '#666', background: '#fff' }}>
       <div className="mx-auto px-4" style={{ maxWidth: 1184 }}>
@@ -109,21 +111,25 @@ export default function MallFooter() {
           <span style={{ margin: '0 8px', color: '#ddd' }}>·</span>
           <Link to={withRef('/mall/info/seller-help')}>商家帮助</Link>
           <span style={{ margin: '0 8px', color: '#ddd' }}>·</span>
-          <Link to={withRef('/mall/info/privacy')}>隐私政策</Link>
+          <Link to="/legal/user-agreement">用户服务协议</Link>
+          <span style={{ margin: '0 8px', color: '#ddd' }}>·</span>
+          <Link to="/legal/privacy-policy">隐私政策</Link>
+          <span style={{ margin: '0 8px', color: '#ddd' }}>·</span>
+          <Link to="/legal/merchant-agreement">商家入驻协议</Link>
         </div>
 
         <div className="text-center text-xs pb-6" style={{ color: '#999' }}>
-          沐泽健康 ·{' '}
+          {site.legalEntityName || site.siteName} ·{' '}
           <a
             href="https://beian.miit.gov.cn/"
             target="_blank"
             rel="noopener noreferrer"
             style={{ color: '#999' }}
           >
-            浙ICP备2026035190号-1
+            {site.icpRecordNumber}
           </a>
           <br />
-          Copyright © 2026 沐泽健康
+          Copyright © 2026 {site.siteName}
         </div>
       </div>
     </footer>

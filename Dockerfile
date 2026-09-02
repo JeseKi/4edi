@@ -68,6 +68,7 @@ RUN set -eux; \
 
 COPY src/server/ ./src/server/
 COPY config ./config
+COPY legal_documents ./legal_documents
 COPY --from=builder /app/dist ./dist
 COPY run.py .
 COPY alembic.ini ./alembic.ini

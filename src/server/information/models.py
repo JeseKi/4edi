@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -17,6 +17,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    text,
 )
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -31,6 +32,55 @@ class InformationStatus(str, Enum):
     PENDING = "pending"
     APPROVED = "approved"
     REJECTED = "rejected"
+
+
+class PublisherVerificationStatus(str, Enum):
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class PublisherVerification(Base):
+    __tablename__ = "information_publisher_verifications"
+    __table_args__ = (
+        Index(
+            "uq_info_verify_pending",
+            "user_id",
+            unique=True,
+            sqlite_where=text("status = 'PENDING'"),
+            postgresql_where=text("status = 'PENDING'"),
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    real_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    document_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    document_number_encrypted: Mapped[str] = mapped_column(Text, nullable=False)
+    document_number_masked: Mapped[str] = mapped_column(String(64), nullable=False)
+    document_front_asset_id: Mapped[str] = mapped_column(
+        ForeignKey("file_assets.id", ondelete="RESTRICT"), nullable=False
+    )
+    document_back_asset_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("file_assets.id", ondelete="RESTRICT"), default=None
+    )
+    document_valid_until: Mapped[Optional[date]] = mapped_column(default=None)
+    document_long_term: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    status: Mapped[PublisherVerificationStatus] = mapped_column(
+        SQLEnum(PublisherVerificationStatus),
+        nullable=False,
+        default=PublisherVerificationStatus.PENDING,
+    )
+    submitted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    reviewer_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=None)
+    reject_reason: Mapped[Optional[str]] = mapped_column(String(300), default=None)
 
 
 class InformationPost(Base):
@@ -57,6 +107,11 @@ class InformationPost(Base):
     poster_user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    publisher_verification_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("information_publisher_verifications.id", ondelete="RESTRICT"),
+        nullable=True,
+        index=True,
+    )
     status: Mapped[InformationStatus] = mapped_column(
         SQLEnum(InformationStatus), nullable=False, default=InformationStatus.PENDING
     )
@@ -77,3 +132,9 @@ class InformationPost(Base):
     approved_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), default=None
     )
+    reviewed_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), default=None
+    )
+    reviewed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=None)
+    withdrawn_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), default=None)
+    withdrawn_reason: Mapped[Optional[str]] = mapped_column(String(300), default=None)

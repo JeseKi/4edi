@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { Link, useParams } from 'react-router-dom'
-import { Empty, Pagination, Spin } from 'antd'
+import { Descriptions, Empty, Pagination, Spin, Tag } from 'antd'
 import { getMallShopPublic, searchMallGoods } from '../../lib/mall'
 import type { MallGoods, MallShopPublic } from '../../lib/types'
 import { formatFen } from '../../lib/mallFormat'
@@ -84,6 +84,16 @@ export default function MallShopPage() {
                     {shop.description}
                   </div>
                 )}
+                <Descriptions className="mt-3" size="small" column={1}>
+                  <Descriptions.Item label="经营主体">{shop.legal_entity_name || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="统一社会信用代码">{shop.unified_social_credit_code_masked || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="登记状态">{shop.registration_status || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="实际经营地址">{shop.business_address || '-'}</Descriptions.Item>
+                  <Descriptions.Item label="平台核验">
+                    <Tag color="green">平台已核验</Tag>
+                    {shop.last_qualification_checked_at ? `最近核验：${shop.last_qualification_checked_at}` : ''}
+                  </Descriptions.Item>
+                </Descriptions>
               </div>
             </div>
           ) : (

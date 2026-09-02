@@ -1,4 +1,5 @@
 import { Link } from 'react-router-dom'
+import { useRuntimeConfig } from '../../hooks/useRuntimeConfig'
 
 const withRef = (to: string) => {
   const hashIndex = to.indexOf('#')
@@ -9,6 +10,7 @@ const withRef = (to: string) => {
 }
 
 export default function InformationFooter() {
+  const { site } = useRuntimeConfig()
   return (
     <footer style={{ color: '#666', background: '#fff' }}>
       <div className="mx-auto px-4" style={{ maxWidth: 1184 }}>
@@ -37,7 +39,9 @@ export default function InformationFooter() {
               items: [
                 { text: '关于我们', to: '/mall/info/about' },
                 { text: '联系我们', to: '/mall/info/contact' },
-                { text: '隐私政策', to: '/mall/info/privacy' },
+                { text: '用户服务协议', to: '/legal/user-agreement' },
+                { text: '隐私政策', to: '/legal/privacy-policy' },
+                { text: '商家入驻协议', to: '/legal/merchant-agreement' },
               ],
             },
             {
@@ -76,20 +80,24 @@ export default function InformationFooter() {
           <Link to={withRef('/mall/information?sort=hot')}>热门榜单</Link>
           <span style={{ margin: '0 8px', color: '#ddd' }}>·</span>
           <Link to={withRef('/mall/information?sort=recommended')}>热门推荐</Link>
+          <span style={{ margin: '0 8px', color: '#ddd' }}>·</span>
+          <Link to="/legal/user-agreement">用户服务协议</Link>
+          <span style={{ margin: '0 8px', color: '#ddd' }}>·</span>
+          <Link to="/legal/privacy-policy">隐私政策</Link>
         </div>
 
         <div className="text-center text-xs pb-6" style={{ color: '#999' }}>
-          沐泽健康 ·{' '}
+          {site.legalEntityName || site.siteName} ·{' '}
           <a
             href="https://beian.miit.gov.cn/"
             target="_blank"
             rel="noopener noreferrer"
             style={{ color: '#999' }}
           >
-            浙ICP备2026035190号-1
+            {site.icpRecordNumber}
           </a>
           <br />
-          Copyright © 2026 沐泽健康
+          Copyright © 2026 {site.siteName}
         </div>
       </div>
     </footer>

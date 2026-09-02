@@ -63,4 +63,7 @@ def test_frontend_config_exposes_the_resolved_web_surface(test_client) -> None:
         spec.name
         for spec in resolve_features(["all"], app_env=global_config.app.env)
     }
-    assert set(response.json()["features"]) == expected
+    payload = response.json()
+    assert set(payload["features"]) == expected
+    assert "service_phone" not in payload["site"]
+    assert "service_email" in payload["site"]

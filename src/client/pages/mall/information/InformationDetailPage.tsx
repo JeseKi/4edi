@@ -3,10 +3,11 @@ import { Link, useParams } from 'react-router-dom'
 import { Breadcrumb, Button, Descriptions, Spin, Tag, Typography } from 'antd'
 import { ArrowLeftOutlined, EyeOutlined, PhoneOutlined, UserOutlined } from '@ant-design/icons'
 import dayjs from 'dayjs'
-import { getInformationDetail, listInformationCategories } from '../../../lib/information'
+import { getInformationContact, getInformationDetail, listInformationCategories } from '../../../lib/information'
 import { resolveApiErrorMessage } from '../../../lib/error'
 import { App } from 'antd'
 import type { InfoCategory, InformationPostDetail } from '../../../lib/types'
+import { useAuth } from '../../../hooks/useAuth'
 
 const MALL_PRIMARY = '#F31947'
 
@@ -16,10 +17,25 @@ const DISCLAIMER =
 export default function InformationDetailPage() {
   const { postId } = useParams()
   const { message } = App.useApp()
+  const { isAuthenticated } = useAuth()
   const [detail, setDetail] = useState<InformationPostDetail | null>(null)
   const [labels, setLabels] = useState<Record<string, string>>({})
   const [notFound, setNotFound] = useState(false)
   const [loading, setLoading] = useState(true)
+  const [contactPhone, setContactPhone] = useState<string | null>(null)
+  const [contactLoading, setContactLoading] = useState(false)
+
+  const revealContact = async () => {
+    setContactLoading(true)
+    try {
+      const contact = await getInformationContact(Number(postId))
+      setContactPhone(contact.contact_phone)
+    } catch (err) {
+      message.error(resolveApiErrorMessage(err, '联系方式加载失败'))
+    } finally {
+      setContactLoading(false)
+    }
+  }
 
   useEffect(() => {
     let cancelled = false
@@ -121,9 +137,19 @@ export default function InformationDetailPage() {
                 <span style={{ color: '#333' }}>联系人：{detail.contact_name}</span>
                 <span style={{ color: '#333' }}>
                   <PhoneOutlined style={{ marginRight: 4 }} />
-                  电话：<b>{detail.contact_phone ? `已打码 ${detail.contact_phone}` : '未填写'}</b>
+                  电话：<b>{contactPhone || detail.contact_phone || '-'}</b>
                 </span>
+                {contactPhone ? (
+                  <a href={`tel:${contactPhone}`}>拨打电话</a>
+                ) : isAuthenticated ? (
+                  <Button size="small" type="primary" loading={contactLoading} onClick={() => void revealContact()}>
+                    查看完整电话
+                  </Button>
+                ) : (
+                  <Link to="/login">登录后查看完整电话</Link>
+                )}
               </div>
+              {contactPhone && <div className="mt-2 text-xs" style={{ color: '#ad6800' }}>完整号码仅用于联系本条信息发布者，请勿用于其他用途。</div>}
             </div>
 
             {/* 详情 */}

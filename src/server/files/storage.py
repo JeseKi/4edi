@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
 from typing import BinaryIO
 from urllib.parse import urlsplit, urlunsplit
@@ -35,6 +36,9 @@ class FileStorage:
         raise NotImplementedError
 
     def delete(self, key: str) -> None:
+        raise NotImplementedError
+
+    def sha256(self, key: str) -> str:
         raise NotImplementedError
 
 
@@ -86,6 +90,14 @@ class LocalFileStorage(FileStorage):
 
     def delete(self, key: str) -> None:
         self._path(key).unlink(missing_ok=True)
+
+    def sha256(self, key: str) -> str:
+        digest = hashlib.sha256()
+        path = self.path_for_download(key)
+        with path.open("rb") as source:
+            while chunk := source.read(1024 * 1024):
+                digest.update(chunk)
+        return digest.hexdigest()
 
 
 class S3FileStorage(FileStorage):
@@ -177,6 +189,26 @@ class S3FileStorage(FileStorage):
             },
             ExpiresIn=self.presign_ttl_seconds,
         )
+
+    def sha256(self, key: str) -> str:
+        try:
+            response = self.client.get_object(Bucket=self.bucket, Key=key)
+        except ClientError as exc:
+            if exc.response.get("Error", {}).get("Code") in {
+                "404",
+                "NoSuchKey",
+                "NotFound",
+            }:
+                raise FileObjectNotFoundError("文件对象不存在") from exc
+            raise FileStorageError("读取对象存储文件失败") from exc
+        body = response["Body"]
+        digest = hashlib.sha256()
+        try:
+            while chunk := body.read(1024 * 1024):
+                digest.update(chunk)
+        finally:
+            body.close()
+        return digest.hexdigest()
 
     def delete(self, key: str) -> None:
         try:

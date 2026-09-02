@@ -167,6 +167,21 @@ ENVIRONMENT_FIELDS: dict[str, dict[str, str]] = {
         "WECHAT_PAY_APIV3_KEY": "wechat_pay_apiv3_key",
         "WECHAT_PAY_NOTIFY_BASE_URL": "wechat_pay_notify_base_url",
     },
+    "compliance": {
+        "SITE_NAME": "site_name",
+        "LEGAL_ENTITY_NAME": "legal_entity_name",
+        "LEGAL_ENTITY_CREDIT_CODE": "legal_entity_credit_code",
+        "REGISTERED_ADDRESS": "registered_address",
+        "SERVICE_EMAIL": "service_email",
+        "ICP_RECORD_NUMBER": "icp_record_number",
+        "USER_AGREEMENT_VERSION": "user_agreement_version",
+        "PRIVACY_POLICY_VERSION": "privacy_policy_version",
+        "MERCHANT_AGREEMENT_VERSION": "merchant_agreement_version",
+        "LEGAL_DOCUMENTS_APPROVED": "legal_documents_approved",
+        "COMPLIANCE_ENCRYPTION_KEY": "sensitive_data_encryption_key",
+        "COMPLIANCE_MATERIAL_RETENTION_DAYS": "material_retention_days",
+        "SHOP_QUALIFICATION_VALID_MONTHS": "qualification_valid_months",
+    },
 }
 
 LIST_ENVIRONMENT_FIELDS = {

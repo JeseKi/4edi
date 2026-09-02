@@ -38,6 +38,7 @@ export default function InformationLayout() {
   const userMenu = {
     items: [
       { key: 'mine', label: <Link to="/mall/information/mine">我的发布</Link> },
+      { key: 'verification', label: <Link to="/mall/information/verification">实名核验</Link> },
       { key: 'logout', label: '退出登录', danger: true },
     ],
     onClick: ({ key }: { key: string }) => {
@@ -86,6 +87,13 @@ export default function InformationLayout() {
                 }}
               >
                 我的发布
+              </Link>
+              <Link
+                to="/mall/information/verification"
+                className="hover:opacity-80"
+                onClick={(e) => { if (!requireLogin()) e.preventDefault() }}
+              >
+                实名核验
               </Link>
               <Link to="/mall/complaint" className="hover:opacity-80">
                 投诉与帮助

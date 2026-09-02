@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import and_, case, false, func, or_
@@ -97,6 +97,18 @@ class ShopDAO(BaseDAO):
         business_license_asset_id: str | None = None,
         identity_front_asset_id: str | None = None,
         identity_back_asset_id: str | None = None,
+        legal_entity_name: str | None = None,
+        unified_social_credit_code: str | None = None,
+        unified_social_credit_code_masked: str | None = None,
+        legal_representative: str | None = None,
+        registered_address: str | None = None,
+        business_address: str | None = None,
+        contact_phone: str | None = None,
+        business_license_valid_until: date | None = None,
+        business_license_long_term: bool = False,
+        merchant_agreement_version: str | None = None,
+        merchant_agreement_asset_id: str | None = None,
+        agreement_accepted_at: datetime | None = None,
     ) -> Shop:
         exists = self.db_session.query(Shop).filter(Shop.owner_user_id == owner_user_id).first()
         if exists:
@@ -107,10 +119,23 @@ class ShopDAO(BaseDAO):
             description=description,
             avatar=avatar,
             real_name=real_name,
-            identity_number=identity_number,
+            identity_number_encrypted=identity_number,
+            identity_number_masked=None,
             business_license_asset_id=business_license_asset_id,
             identity_front_asset_id=identity_front_asset_id,
             identity_back_asset_id=identity_back_asset_id,
+            legal_entity_name=legal_entity_name,
+            unified_social_credit_code=unified_social_credit_code,
+            unified_social_credit_code_masked=unified_social_credit_code_masked,
+            legal_representative=legal_representative,
+            registered_address=registered_address,
+            business_address=business_address,
+            contact_phone=contact_phone,
+            business_license_valid_until=business_license_valid_until,
+            business_license_long_term=business_license_long_term,
+            merchant_agreement_version=merchant_agreement_version,
+            merchant_agreement_asset_id=merchant_agreement_asset_id,
+            agreement_accepted_at=agreement_accepted_at,
             status=ShopStatus.PENDING,
         )
         self.db_session.add(shop)
@@ -139,6 +164,7 @@ class ShopDAO(BaseDAO):
         self,
         *,
         status: ShopStatus | None = None,
+        qualification_state: str | None = None,
         keyword: str | None = None,
         page: int,
         page_size: int,
@@ -146,6 +172,18 @@ class ShopDAO(BaseDAO):
         query = self.db_session.query(Shop)
         if status is not None:
             query = query.filter(Shop.status == status)
+        now = _utcnow()
+        if qualification_state == "expired":
+            query = query.filter(
+                Shop.status == ShopStatus.APPROVED,
+                Shop.qualification_valid_until <= now,
+            )
+        elif qualification_state == "expiring_soon":
+            query = query.filter(
+                Shop.status == ShopStatus.APPROVED,
+                Shop.qualification_valid_until > now,
+                Shop.qualification_valid_until <= now + timedelta(days=30),
+            )
         if keyword:
             query = query.filter(Shop.name.ilike(f"%{keyword}%"))
         total = query.count()
@@ -209,8 +247,13 @@ class GoodsDAO(BaseDAO):
         page: int,
         page_size: int,
     ) -> tuple[list[Goods], int]:
-        query = self.db_session.query(Goods).filter(
-            Goods.status == GoodsStatus.ON, Goods.deleted_at.is_(None)
+        now = datetime.now(timezone.utc)
+        query = self.db_session.query(Goods).join(Shop, Shop.id == Goods.shop_id).filter(
+            Goods.status == GoodsStatus.ON,
+            Goods.deleted_at.is_(None),
+            Shop.status == ShopStatus.APPROVED,
+            Shop.last_qualification_review_id.is_not(None),
+            Shop.qualification_valid_until > now,
         )
         if keyword:
             query = query.filter(Goods.name.ilike(f"%{keyword}%"))

@@ -59,6 +59,30 @@ class SyncASGITestClient:
         return self._run(self._client.get(*args, **kwargs))
 
     def post(self, *args, **kwargs):
+        # 旧业务测试代表已经主动确认当前协议的正常注册流程；在测试客户端
+        # 边界补齐版本，避免非认证用例重复协议样板。合规用例可用专用 header
+        # 禁用默认值，验证后端对缺失字段的 422 响应。
+        path = str(args[0]) if args else str(kwargs.get("url", ""))
+        headers = dict(kwargs.get("headers") or {})
+        omit_defaults = headers.pop("X-Test-Omit-Legal-Versions", None)
+        if headers:
+            kwargs["headers"] = headers
+        elif "headers" in kwargs:
+            kwargs.pop("headers")
+        if (
+            not omit_defaults
+            and path
+            in {
+                "/api/auth/register",
+                "/api/auth/register-with-code",
+                "/api/auth/register-with-phone-code",
+            }
+            and isinstance(kwargs.get("json"), dict)
+        ):
+            payload = dict(kwargs["json"])
+            payload.setdefault("user_agreement_version", "2026-09-02")
+            payload.setdefault("privacy_policy_version", "2026-09-02")
+            kwargs["json"] = payload
         return self._run(self._client.post(*args, **kwargs))
 
     def put(self, *args, **kwargs):

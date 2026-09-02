@@ -3,13 +3,13 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Generic, TypeVar
 
 from pydantic import BaseModel, Field, field_validator
 
 from .constants import INFORMATION_CATEGORIES
-from .models import InformationStatus
+from .models import InformationStatus, PublisherVerificationStatus
 
 T = TypeVar("T")
 
@@ -39,7 +39,7 @@ class PostCreateIn(BaseModel):
     title: str = Field(..., min_length=1, max_length=120)
     price: str | None = Field(default=None, max_length=50)
     contact_name: str = Field(..., min_length=1, max_length=50)
-    contact_phone: str | None = Field(default=None, max_length=32)
+    contact_phone: str = Field(..., min_length=5, max_length=32)
     content: str = Field(..., min_length=1, max_length=5000)
     attributes: dict[str, str] | None = None
 
@@ -90,6 +90,10 @@ class PostMineOut(PostDetailOut):
 
     status: InformationStatus
     reject_reason: str | None
+    reviewed_by_user_id: int | None
+    reviewed_at: datetime | None
+    withdrawn_at: datetime | None
+    withdrawn_reason: str | None
 
     model_config = {"from_attributes": True}
 
@@ -98,8 +102,59 @@ class PostAdminListOut(PostMineOut):
     """管理员列表项。"""
 
     poster_user_id: int
+    publisher_verification_id: int | None
+    publisher_real_name: str | None
+    publisher_document_number_masked: str | None
+    publisher_verification_valid: bool
 
 
 class PostReviewIn(BaseModel):
     approved: bool
     reject_reason: str | None = Field(default=None, max_length=200)
+
+
+class ContactOut(BaseModel):
+    contact_name: str
+    contact_phone: str
+
+
+class PublisherVerificationCreateIn(BaseModel):
+    real_name: str = Field(..., min_length=2, max_length=100)
+    document_type: str = Field(..., pattern="^(resident_identity_card|passport)$")
+    document_number: str = Field(..., min_length=5, max_length=64)
+    document_front_asset_id: str = Field(..., min_length=32, max_length=32)
+    document_back_asset_id: str | None = Field(default=None, min_length=32, max_length=32)
+    document_valid_until: date | None = None
+    document_long_term: bool = False
+
+
+class PublisherVerificationReviewIn(BaseModel):
+    approved: bool
+    reject_reason: str | None = Field(default=None, max_length=300)
+
+
+class PublisherVerificationOut(BaseModel):
+    id: int
+    user_id: int
+    username: str
+    real_name: str
+    document_type: str
+    document_number_masked: str
+    document_front_asset_id: str
+    document_back_asset_id: str | None
+    document_valid_until: date | None
+    document_long_term: bool
+    status: PublisherVerificationStatus
+    submitted_at: datetime
+    reviewer_user_id: int | None
+    reviewer_username: str | None
+    reviewed_at: datetime | None
+    reject_reason: str | None
+    is_currently_valid: bool
+
+
+class PublisherVerificationPageOut(BaseModel):
+    items: list[PublisherVerificationOut]
+    total: int
+    page: int
+    page_size: int

@@ -9,7 +9,12 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from src.server.dao.dao_base import BaseDAO
-from .models import InformationPost, InformationStatus
+from .models import (
+    InformationPost,
+    InformationStatus,
+    PublisherVerification,
+    PublisherVerificationStatus,
+)
 
 
 class InformationPostDAO(BaseDAO):
@@ -29,6 +34,7 @@ class InformationPostDAO(BaseDAO):
         price: str | None = None,
         contact_phone: str | None = None,
         attributes: dict[str, str] | None = None,
+        publisher_verification_id: int | None = None,
     ) -> InformationPost:
         post = InformationPost(
             title=title,
@@ -39,6 +45,7 @@ class InformationPostDAO(BaseDAO):
             contact_name=contact_name,
             contact_phone=contact_phone,
             poster_user_id=poster_user_id,
+            publisher_verification_id=publisher_verification_id,
             status=InformationStatus.PENDING,
             view_count=0,
             is_top=False,
@@ -69,8 +76,17 @@ class InformationPostDAO(BaseDAO):
         page: int,
         page_size: int,
     ) -> tuple[list[InformationPost], int]:
-        query = self.db_session.query(InformationPost).filter(
-            InformationPost.status == InformationStatus.APPROVED
+        query = self.db_session.query(InformationPost).join(
+            PublisherVerification,
+            PublisherVerification.id == InformationPost.publisher_verification_id,
+        ).filter(
+            InformationPost.status == InformationStatus.APPROVED,
+            InformationPost.withdrawn_at.is_(None),
+            PublisherVerification.status == PublisherVerificationStatus.APPROVED,
+            or_(
+                PublisherVerification.document_long_term.is_(True),
+                PublisherVerification.document_valid_until >= datetime.now(timezone.utc).date(),
+            ),
         )
         if category:
             query = query.filter(InformationPost.category == category)
@@ -143,9 +159,12 @@ class InformationPostDAO(BaseDAO):
         status: InformationStatus,
         reject_reason: str | None = None,
         approved: bool = False,
+        reviewer_user_id: int,
     ) -> InformationPost:
         post.status = status
         post.reject_reason = reject_reason
+        post.reviewed_by_user_id = reviewer_user_id
+        post.reviewed_at = datetime.now(timezone.utc)
         if approved:
             post.approved_at = datetime.now(timezone.utc)
         else:
@@ -155,5 +174,12 @@ class InformationPostDAO(BaseDAO):
 
     def set_top(self, post: InformationPost, *, on: bool) -> InformationPost:
         post.is_top = on
+        self.db_session.flush()
+        return post
+
+    def withdraw(self, post: InformationPost, reason: str) -> InformationPost:
+        post.withdrawn_at = datetime.now(timezone.utc)
+        post.withdrawn_reason = reason
+        post.is_top = False
         self.db_session.flush()
         return post

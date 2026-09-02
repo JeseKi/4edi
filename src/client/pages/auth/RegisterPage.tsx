@@ -3,6 +3,7 @@ import {
   App,
   Button,
   Card,
+  Checkbox,
   Flex,
   Form,
   Input,
@@ -25,6 +26,7 @@ import TurnstileWidget from '../../components/auth/TurnstileWidget'
 import { useAuth } from '../../hooks/useAuth'
 import { useRuntimeConfig } from '../../hooks/useRuntimeConfig'
 import { resolveApiErrorMessage } from '../../lib/error'
+import { listLegalDocuments } from '../../lib/legal'
 
 type RegisterMode = 'email' | 'phone'
 
@@ -52,6 +54,8 @@ export default function RegisterPage() {
     password: string
     confirmPassword: string
     code: string
+    acceptUserAgreement: boolean
+    acceptPrivacyPolicy: boolean
   }>()
   const [mode, setMode] = useState<RegisterMode>('email')
   const [submitting, setSubmitting] = useState(false)
@@ -59,6 +63,17 @@ export default function RegisterPage() {
   const [error, setError] = useState<string | null>(null)
   const [codeCountdown, setCodeCountdown] = useState(0)
   const [turnstileToken, setTurnstileToken] = useState<string | null>(null)
+  const [legalVersions, setLegalVersions] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    listLegalDocuments()
+      .then((documents) => {
+        setLegalVersions(
+          Object.fromEntries(documents.map((document) => [document.document_type, document.version])),
+        )
+      })
+      .catch(() => setError('协议加载失败，请刷新页面后重试'))
+  }, [])
 
   useEffect(() => {
     if (!loading && isAuthenticated) {
@@ -118,6 +133,8 @@ export default function RegisterPage() {
     password: string
     confirmPassword: string
     code: string
+    acceptUserAgreement: boolean
+    acceptPrivacyPolicy: boolean
   }) => {
     if (requireTurnstile()) {
       return
@@ -125,6 +142,11 @@ export default function RegisterPage() {
     setSubmitting(true)
     setError(null)
     try {
+      const userAgreementVersion = legalVersions.user_agreement
+      const privacyPolicyVersion = legalVersions.privacy_policy
+      if (!userAgreementVersion || !privacyPolicyVersion) {
+        throw new Error('协议版本尚未加载，请稍后重试')
+      }
       if (mode === 'email') {
         await registerWithCode({
           username: values.username ?? '',
@@ -132,6 +154,8 @@ export default function RegisterPage() {
           password: values.password,
           code: values.code,
           turnstile_token: turnstileToken ?? undefined,
+          user_agreement_version: userAgreementVersion,
+          privacy_policy_version: privacyPolicyVersion,
         })
       } else {
         await registerWithPhoneCode({
@@ -139,6 +163,8 @@ export default function RegisterPage() {
           password: values.password,
           code: values.code,
           turnstile_token: turnstileToken ?? undefined,
+          user_agreement_version: userAgreementVersion,
+          privacy_policy_version: privacyPolicyVersion,
         })
       }
       message.success('注册成功')
@@ -163,7 +189,7 @@ export default function RegisterPage() {
   }
 
   return (
-    <Flex align="center" justify="center" style={{ minHeight: '100vh', padding: '48px 16px' }}>
+    <Flex align="flex-start" justify="center" style={{ minHeight: '100vh', padding: '48px 16px' }}>
       <Card bordered={false} className="theme-card-shadow" style={{ width: '100%', maxWidth: 420 }}>
         <Space direction="vertical" size={24} style={{ width: '100%' }}>
           <div>
@@ -286,6 +312,30 @@ export default function RegisterPage() {
             >
               <Input.Password size="large" prefix={<LockOutlined />} placeholder="请再次输入密码" autoComplete="new-password" />
             </Form.Item>
+            <Form.Item
+              name="acceptUserAgreement"
+              valuePropName="checked"
+              rules={[{ validator: (_, value) => value ? Promise.resolve() : Promise.reject(new Error('请阅读并同意用户服务协议')) }]}
+            >
+              <Checkbox>
+                我已阅读并同意{' '}
+                <a href="/legal/user-agreement" target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
+                  《用户服务协议》
+                </a>
+              </Checkbox>
+            </Form.Item>
+            <Form.Item
+              name="acceptPrivacyPolicy"
+              valuePropName="checked"
+              rules={[{ validator: (_, value) => value ? Promise.resolve() : Promise.reject(new Error('请阅读并同意隐私政策')) }]}
+            >
+              <Checkbox>
+                我已阅读并同意{' '}
+                <a href="/legal/privacy-policy" target="_blank" rel="noreferrer" onClick={(event) => event.stopPropagation()}>
+                  《隐私政策》
+                </a>
+              </Checkbox>
+            </Form.Item>
             {turnstileEnabled ? (
               <Form.Item>
                 <TurnstileWidget
@@ -303,6 +353,7 @@ export default function RegisterPage() {
                 size="large"
                 icon={<UserAddOutlined />}
                 loading={submitting}
+                disabled={!legalVersions.user_agreement || !legalVersions.privacy_policy}
                 block
               >
                 注册

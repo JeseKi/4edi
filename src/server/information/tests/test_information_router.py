@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 from src.server.auth.tests._auth_router_helpers import _auth_headers, _register_user
+from src.server.information.tests._compliance_helpers import qualify_user_via_api
 
 VALID_PAYLOAD = {
     "category": "mini_program",
@@ -53,6 +54,8 @@ def test_publish_requires_login(test_client):
 def test_full_flow_publish_review_public_list_delete(test_client, init_test_database):
     _register_user(test_client, username="alice-info", email="alice-info@example.com")
     alice_headers = _login(test_client, username="alice-info")
+    admin_headers = _login_admin(test_client)
+    qualify_user_via_api(test_client, alice_headers, admin_headers)
 
     # 发布 → 待审核，本人返回完整号码
     resp = test_client.post("/api/information", headers=alice_headers, json=VALID_PAYLOAD)
@@ -78,7 +81,6 @@ def test_full_flow_publish_review_public_list_delete(test_client, init_test_data
     assert resp.status_code == 403
 
     # 管理员审核通过
-    admin_headers = _login_admin(test_client)
     resp = test_client.post(
         f"/api/information/admin/posts/{post_id}/review",
         headers=admin_headers,
@@ -99,6 +101,17 @@ def test_full_flow_publish_review_public_list_delete(test_client, init_test_data
     detail = resp.json()
     assert detail["contact_phone"] == "183****5067"
     assert detail["view_count"] == 1
+
+    resp = test_client.get(f"/api/information/{post_id}/contact")
+    assert resp.status_code == 401
+    resp = test_client.get(
+        f"/api/information/{post_id}/contact", headers=bob_headers
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {
+        "contact_name": "张三",
+        "contact_phone": "18312345067",
+    }
 
     # 我的发布：完整号码 + 状态
     resp = test_client.get("/api/information/mine", headers=alice_headers)
@@ -129,12 +142,13 @@ def test_full_flow_publish_review_public_list_delete(test_client, init_test_data
 def test_admin_reject_requires_reason(test_client, init_test_database):
     _register_user(test_client, username="carol-info", email="carol-info@example.com")
     headers = _login(test_client, username="carol-info")
+    admin_headers = _login_admin(test_client)
+    qualify_user_via_api(test_client, headers, admin_headers)
 
     resp = test_client.post("/api/information", headers=headers, json=VALID_PAYLOAD)
     assert resp.status_code == 201, resp.text
     post_id = resp.json()["id"]
 
-    admin_headers = _login_admin(test_client)
     resp = test_client.post(
         f"/api/information/admin/posts/{post_id}/review",
         headers=admin_headers,

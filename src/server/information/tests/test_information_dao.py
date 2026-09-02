@@ -7,7 +7,12 @@ from sqlalchemy.orm import Session
 
 from src.server.auth.models import User
 from src.server.information.dao import InformationPostDAO
-from src.server.information.models import InformationPost, InformationStatus
+from src.server.information.models import (
+    InformationPost,
+    InformationStatus,
+    PublisherVerification,
+)
+from src.server.information.tests._compliance_helpers import qualify_user_in_db
 
 
 def _make_user(db: Session, username: str) -> User:
@@ -15,6 +20,7 @@ def _make_user(db: Session, username: str) -> User:
     user.set_password("Password123")
     db.add(user)
     db.flush()
+    qualify_user_in_db(db, user)
     return user
 
 
@@ -31,6 +37,11 @@ def _make_post(
     status: InformationStatus = InformationStatus.PENDING,
 ) -> InformationPost:
     dao = InformationPostDAO(db)
+    verification = (
+        db.query(PublisherVerification)
+        .filter(PublisherVerification.user_id == user_id)
+        .one()
+    )
     post = dao.create(
         title=title,
         category=category,
@@ -40,6 +51,7 @@ def _make_post(
         poster_user_id=user_id,
         price=price,
         attributes={"dev_method": "原生开发"},
+        publisher_verification_id=verification.id,
     )
     if status != InformationStatus.PENDING:
         dao.update_status(
@@ -47,6 +59,7 @@ def _make_post(
             status=status,
             reject_reason=None if status == InformationStatus.APPROVED else "不符合规范",
             approved=status == InformationStatus.APPROVED,
+            reviewer_user_id=user_id,
         )
     if view_count:
         post.view_count = view_count
@@ -163,7 +176,10 @@ def test_info_dao_list_mine_and_admin_and_mutations(test_db_session: Session):
 
     # 审核状态流转
     dao.update_status(
-        alice_post, status=InformationStatus.APPROVED, approved=True
+        alice_post,
+        status=InformationStatus.APPROVED,
+        approved=True,
+        reviewer_user_id=alice.id,
     )
     assert alice_post.status == InformationStatus.APPROVED
     assert alice_post.approved_at is not None

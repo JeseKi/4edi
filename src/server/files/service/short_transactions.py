@@ -7,6 +7,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import PurePath
 
 from fastapi import HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from src.server.auth.dependencies import AuthenticatedPrincipal, is_administrative_role
@@ -14,7 +15,7 @@ from src.server.config import global_config
 from src.server.task_runtime import TaskReference, TaskRuntime
 
 from ..dao import FileAssetDAO
-from ..models import FileAsset
+from ..models import FileAsset, FileAssetReference
 from ..schemas import FileAssetOut, FileUploadIntentCreate
 from ..storage import FileStorage, LocalFileStorage, StoredObject
 from .long_tasks import DELETE_FILE_OBJECT, EXPIRE_PENDING_FILE
@@ -25,6 +26,7 @@ STATUS_EXPIRED = "expired"
 STATUS_REJECTED = "rejected"
 STATUS_DELETION_PENDING = "deletion_pending"
 STATUS_DELETED = "deleted"
+COMPLIANCE_EXTENSIONS = frozenset({".jpeg", ".jpg", ".pdf", ".png", ".webp"})
 
 # 客户端 MIME 在 WPS、浏览器和各操作系统之间并不可靠；上传准入以扩展名白名单为准。
 FILE_EXTENSION_MEDIA_TYPES = {
@@ -145,6 +147,95 @@ def get_asset(db: Session, asset_id: str, principal: AuthenticatedPrincipal) -> 
     return asset
 
 
+def assert_owned_available_assets(
+    db: Session,
+    *,
+    owner_user_id: int,
+    asset_ids: list[str],
+    compliance_material: bool = False,
+) -> dict[str, FileAsset]:
+    unique_ids = set(asset_ids)
+    assets = (
+        db.query(FileAsset)
+        .filter(
+            FileAsset.id.in_(unique_ids),
+            FileAsset.created_by_user_id == owner_user_id,
+            FileAsset.status == STATUS_AVAILABLE,
+        )
+        .all()
+    )
+    by_id = {asset.id: asset for asset in assets}
+    if len(by_id) != len(unique_ids):
+        raise HTTPException(status_code=422, detail="材料不存在、尚未上传完成或不属于当前用户")
+    if compliance_material:
+        invalid = [
+            asset.original_filename
+            for asset in assets
+            if PurePath(asset.original_filename).suffix.lower() not in COMPLIANCE_EXTENSIONS
+        ]
+        if invalid:
+            raise HTTPException(status_code=422, detail="合规材料仅允许图片或 PDF")
+    return by_id
+
+
+def attach_asset_reference(
+    db: Session,
+    *,
+    asset_id: str,
+    resource_type: str,
+    resource_id: str | int,
+    purpose: str,
+) -> FileAssetReference:
+    existing = (
+        db.query(FileAssetReference)
+        .filter(
+            FileAssetReference.asset_id == asset_id,
+            FileAssetReference.resource_type == resource_type,
+            FileAssetReference.resource_id == str(resource_id),
+            FileAssetReference.purpose == purpose,
+        )
+        .first()
+    )
+    if existing is not None:
+        existing.released_at = None
+        existing.retain_until = None
+        db.flush()
+        return existing
+    reference = FileAssetReference(
+        asset_id=asset_id,
+        resource_type=resource_type,
+        resource_id=str(resource_id),
+        purpose=purpose,
+    )
+    db.add(reference)
+    db.flush()
+    return reference
+
+
+def release_asset_references(
+    db: Session,
+    *,
+    resource_type: str,
+    resource_id: str | int,
+    retain_until: datetime,
+) -> int:
+    now = datetime.now(timezone.utc)
+    references = (
+        db.query(FileAssetReference)
+        .filter(
+            FileAssetReference.resource_type == resource_type,
+            FileAssetReference.resource_id == str(resource_id),
+            FileAssetReference.released_at.is_(None),
+        )
+        .all()
+    )
+    for reference in references:
+        reference.released_at = now
+        reference.retain_until = retain_until
+    db.flush()
+    return len(references)
+
+
 def list_assets(
     db: Session, principal: AuthenticatedPrincipal, offset: int, limit: int, owner_user_id: int | None
 ) -> tuple[list[FileAsset], int]:
@@ -177,6 +268,22 @@ def get_snapshot_for_download(
     db: Session, asset_id: str, principal: AuthenticatedPrincipal
 ) -> FileAssetSnapshot:
     asset = get_asset(db, asset_id, principal)
+    return FileAssetSnapshot(
+        id=asset.id,
+        storage_key=asset.storage_key,
+        storage_driver=asset.storage_driver,
+        original_filename=asset.original_filename,
+        content_type=asset.content_type,
+        size_bytes=asset.size_bytes,
+        status=asset.status,
+    )
+
+
+def get_available_asset_snapshot(db: Session, asset_id: str) -> FileAssetSnapshot:
+    """供已完成领域鉴权的服务读取可用文件元数据。"""
+    asset = FileAssetDAO(db).get(asset_id)
+    if asset is None or asset.status != STATUS_AVAILABLE:
+        raise HTTPException(status_code=409, detail="归档文件不存在或尚未上传完成")
     return FileAssetSnapshot(
         id=asset.id,
         storage_key=asset.storage_key,
@@ -235,6 +342,21 @@ def mark_for_deletion(
     db: Session, runtime: TaskRuntime, asset_id: str, principal: AuthenticatedPrincipal
 ) -> FileAssetOut:
     asset = _get_authorized_asset(db, asset_id, principal)
+    now = datetime.now(timezone.utc)
+    protected = (
+        db.query(FileAssetReference.id)
+        .filter(
+            FileAssetReference.asset_id == asset_id,
+            or_(
+                FileAssetReference.released_at.is_(None),
+                FileAssetReference.retain_until.is_(None),
+                FileAssetReference.retain_until > now,
+            ),
+        )
+        .first()
+    )
+    if protected is not None:
+        raise HTTPException(status_code=409, detail="文件仍被合规业务引用或处于留存期")
     if asset.status == STATUS_DELETED:
         return _to_out(asset)
     if asset.status != STATUS_DELETION_PENDING:

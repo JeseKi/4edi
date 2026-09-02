@@ -11,6 +11,7 @@ from src.server.auth.models import User
 from src.server.information import service
 from src.server.information.dao import InformationPostDAO
 from src.server.information.models import InformationStatus
+from src.server.information.tests._compliance_helpers import qualify_user_in_db
 
 VALID_PAYLOAD = {
     "category": "mini_program",
@@ -28,6 +29,7 @@ def _make_user(db: Session, username: str) -> User:
     user.set_password("Password123")
     db.add(user)
     db.flush()
+    qualify_user_in_db(db, user)
     return user
 
 
@@ -35,7 +37,12 @@ def _approve(db: Session, post_id: int) -> None:
     dao = InformationPostDAO(db)
     post = dao.get(post_id)
     assert post is not None
-    dao.update_status(post, status=InformationStatus.APPROVED, approved=True)
+    dao.update_status(
+        post,
+        status=InformationStatus.APPROVED,
+        approved=True,
+        reviewer_user_id=post.poster_user_id,
+    )
     db.flush()
 
 
@@ -108,7 +115,9 @@ def test_mine_and_delete_permissions(test_db_session: Session):
     assert mine[0]["status"] == "pending"
 
     service.delete_post(test_db_session, alice.id, post.id)  # 本人可删除
-    assert service.list_mine(test_db_session, alice.id) == []
+    withdrawn = service.list_mine(test_db_session, alice.id)
+    assert len(withdrawn) == 1
+    assert withdrawn[0]["withdrawn_at"] is not None
 
     post2 = service.create_post(test_db_session, alice.id, dict(VALID_PAYLOAD))
     with pytest.raises(HTTPException) as exc_info:
@@ -126,17 +135,31 @@ def test_admin_review_and_toggle_top(test_db_session: Session):
 
     # 驳回必须给原因
     with pytest.raises(HTTPException) as exc_info:
-        service.admin_review(test_db_session, post.id, approved=False, reject_reason=None)
+        service.admin_review(
+            test_db_session,
+            post.id,
+            approved=False,
+            reject_reason=None,
+            reviewer_user_id=user.id,
+        )
     assert exc_info.value.status_code == 400
 
     rejected = service.admin_review(
-        test_db_session, post.id, approved=False, reject_reason="内容与类目不符"
+        test_db_session,
+        post.id,
+        approved=False,
+        reject_reason="内容与类目不符",
+        reviewer_user_id=user.id,
     )
     assert rejected.status == InformationStatus.REJECTED
     assert rejected.reject_reason == "内容与类目不符"
 
     approved = service.admin_review(
-        test_db_session, post.id, approved=True, reject_reason=None
+        test_db_session,
+        post.id,
+        approved=True,
+        reject_reason=None,
+        reviewer_user_id=user.id,
     )
     assert approved.status == InformationStatus.APPROVED
     assert approved.approved_at is not None

@@ -62,6 +62,9 @@ def test_local_upload_complete_and_authorization(test_db_session: Session, tmp_p
     assert error is None
     assert result.status == "available"
     assert storage.path_for_download(snapshot.storage_key).read_bytes() == b"hello"
+    assert storage.sha256(snapshot.storage_key) == (
+        "2cf24dba5fb0a30e26e83b2ac5b9e29e1b161e5c1fa7425e73043362938b9824"
+    )
 
     with pytest.raises(HTTPException) as exc:
         service.get_asset(test_db_session, asset.id, _principal(2))

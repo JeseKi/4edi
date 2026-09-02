@@ -138,6 +138,8 @@ class PhoneRegisterWithCode(BaseModel):
     code: str = Field(..., min_length=6, max_length=6)
     password: str = Field(..., min_length=8)
     turnstile_token: str | None = Field(default=None, min_length=1, max_length=2048)
+    user_agreement_version: str = Field(..., min_length=1, max_length=32)
+    privacy_policy_version: str = Field(..., min_length=1, max_length=32)
 
 
 class PhonePasswordResetRequest(BaseModel):
@@ -153,6 +155,30 @@ class UserRegisterWithCode(BaseModel):
     password: str = Field(..., min_length=8)
     code: str = Field(..., min_length=6, max_length=6)
     turnstile_token: str | None = Field(default=None, min_length=1, max_length=2048)
+    user_agreement_version: str = Field(..., min_length=1, max_length=32)
+    privacy_policy_version: str = Field(..., min_length=1, max_length=32)
+
+
+class LegalAcceptanceIn(BaseModel):
+    user_agreement_version: str = Field(..., min_length=1, max_length=32)
+    privacy_policy_version: str = Field(..., min_length=1, max_length=32)
+
+
+class LegalAcceptanceStatusOut(BaseModel):
+    user_agreement_version: str
+    privacy_policy_version: str
+    user_agreement_accepted: bool
+    privacy_policy_accepted: bool
+    all_current_accepted: bool
+
+
+class LegalDocumentOut(BaseModel):
+    document_type: str
+    title: str
+    version: str
+    effective_at: str
+    is_current: bool
+    content_markdown: str
 
 
 class PasswordResetLinkRequest(BaseModel):

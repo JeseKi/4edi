@@ -22,6 +22,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -102,6 +103,29 @@ class User(Base):
         from .service.scopes import get_role_scopes
 
         return get_role_scopes(self.role)
+
+
+class LegalAcceptance(Base):
+    """用户对某一固定版本法律文档的不可补造接受记录。"""
+
+    __tablename__ = "legal_acceptances"
+    __table_args__ = (
+        UniqueConstraint(
+            "user_id", "document_type", "document_version", name="uq_legal_acceptance"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    document_type: Mapped[str] = mapped_column(String(40), nullable=False)
+    document_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    accepted_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=lambda: datetime.now(timezone.utc)
+    )
+    client_ip: Mapped[Optional[str]] = mapped_column(String(80), default=None)
+    user_agent: Mapped[Optional[str]] = mapped_column(String(500), default=None)
 
 
 class RefreshToken(Base):

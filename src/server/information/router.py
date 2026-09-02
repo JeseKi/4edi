@@ -18,8 +18,10 @@ from src.server.database_executor import DatabaseExecutor, get_database_executor
 
 from . import service
 from .models import InformationStatus
+from .models import PublisherVerificationStatus
 from .schemas import (
     CategoryOut,
+    ContactOut,
     PageOut,
     PostAdminListOut,
     PostCreateIn,
@@ -27,6 +29,10 @@ from .schemas import (
     PostMineOut,
     PostOut,
     PostReviewIn,
+    PublisherVerificationCreateIn,
+    PublisherVerificationOut,
+    PublisherVerificationPageOut,
+    PublisherVerificationReviewIn,
 )
 
 router = APIRouter(prefix="/api/information", tags=["商城-信息发布"])
@@ -90,6 +96,51 @@ async def list_my_information(
     )
 
 
+@router.get(
+    "/verification/me",
+    summary="我的发布者实名记录",
+    response_model=list[PublisherVerificationOut],
+)
+async def my_publisher_verifications(
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    return await database_executor.run(
+        lambda db: service.list_my_verifications(db, current_user.user_id)
+    )
+
+
+@router.post(
+    "/verification",
+    summary="提交发布者实名申请",
+    response_model=PublisherVerificationOut,
+    status_code=status.HTTP_201_CREATED,
+)
+async def submit_publisher_verification(
+    request: Request,
+    payload: PublisherVerificationCreateIn,
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _submit(db):
+        verification = service.submit_verification(
+            db, current_user.user_id, payload.model_dump()
+        )
+        from src.server.audit import service as audit_service
+
+        audit_service.attach_audit_context(
+            request.state,
+            priority="high",
+            action="information.publisher_verification.submit",
+            resource_type="publisher_verification",
+            resource_id=verification.id,
+            target_summary=f"发布者实名申请 {verification.id}",
+        )
+        return service.get_verification_payload(db, verification.id)
+
+    return await database_executor.run(_submit)
+
+
 @router.get("/{post_id}", summary="信息详情", response_model=PostDetailOut)
 async def get_information(
     post_id: int,
@@ -102,6 +153,37 @@ async def get_information(
                 status_code=status.HTTP_404_NOT_FOUND, detail="信息不存在或未公开"
             )
         return detail
+
+    return await database_executor.run(_get)
+
+
+@router.get(
+    "/{post_id}/contact",
+    summary="查看已公开信息的完整联系方式",
+    response_model=ContactOut,
+)
+async def get_information_contact(
+    request: Request,
+    post_id: int,
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _get(db: Session) -> dict:
+        contact = service.get_contact(db, post_id)
+        if contact is None:
+            raise HTTPException(status_code=404, detail="信息不存在或未公开")
+        from src.server.audit import service as audit_service
+
+        audit_service.attach_audit_context(
+            request.state,
+            priority="high",
+            action="information.contact.read",
+            resource_type="information",
+            resource_id=post_id,
+            target_summary=f"查看信息 {post_id} 联系方式",
+            detail={"viewer_user_id": current_user.user_id},
+        )
+        return contact
 
     return await database_executor.run(_get)
 
@@ -192,6 +274,7 @@ async def admin_review_information(
             post_id,
             approved=payload.approved,
             reject_reason=payload.reject_reason,
+            reviewer_user_id=current_admin.user_id,
         )
         from src.server.audit import service as audit_service
 
@@ -202,7 +285,74 @@ async def admin_review_information(
             resource_id=post.id,
             target_summary=post.title,
         )
-        return service.admin_item_payload(post, current_admin.username)
+        return service.get_admin_item_payload(db, post)
+
+    return await database_executor.run(_review)
+
+
+@admin_router.get(
+    "/verifications",
+    summary="发布者实名审核列表",
+    response_model=PublisherVerificationPageOut,
+)
+async def admin_list_publisher_verifications(
+    verification_status: _STATUS_LITERAL | None = Query(default=None, alias="status"),
+    keyword: str | None = Query(default=None, max_length=100),
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    _: AuthenticatedPrincipal = Security(get_current_admin),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _list(db: Session) -> dict:
+        status_filter = (
+            PublisherVerificationStatus(verification_status)
+            if verification_status
+            else None
+        )
+        items, total = service.admin_list_verifications(
+            db,
+            verification_status=status_filter,
+            keyword=keyword,
+            page=page,
+            page_size=page_size,
+        )
+        return {"items": items, "total": total, "page": page, "page_size": page_size}
+
+    return await database_executor.run(_list)
+
+
+@admin_router.post(
+    "/verifications/{verification_id}/review",
+    summary="审核发布者实名申请",
+    response_model=PublisherVerificationOut,
+)
+async def admin_review_publisher_verification(
+    request: Request,
+    verification_id: int,
+    payload: PublisherVerificationReviewIn,
+    current_admin: AuthenticatedPrincipal = Security(get_current_admin),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _review(db: Session) -> dict:
+        verification = service.review_verification(
+            db,
+            verification_id,
+            approved=payload.approved,
+            reject_reason=payload.reject_reason,
+            reviewer_user_id=current_admin.user_id,
+        )
+        from src.server.audit import service as audit_service
+
+        audit_service.attach_audit_context(
+            request.state,
+            priority="high",
+            action="information.publisher_verification.review",
+            resource_type="publisher_verification",
+            resource_id=verification.id,
+            target_summary=f"发布者实名申请 {verification.id}",
+            detail={"approved": payload.approved},
+        )
+        return service.get_verification_payload(db, verification.id)
 
     return await database_executor.run(_review)
 
@@ -230,6 +380,6 @@ async def admin_toggle_information_top(
             resource_id=post.id,
             target_summary=post.title,
         )
-        return service.admin_item_payload(post, current_admin.username)
+        return service.get_admin_item_payload(db, post)
 
     return await database_executor.run(_toggle)

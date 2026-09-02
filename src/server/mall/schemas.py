@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Generic, Literal, TypeVar
 
 from pydantic import BaseModel, ConfigDict, Field
@@ -20,6 +20,8 @@ from .models import (
     OrderStatus,
     RefundStatus,
     RefundType,
+    ShopAgreementStatus,
+    ShopOnboardingStage,
     ShopStatus,
     UserCouponStatus,
     WithdrawStatus,
@@ -63,12 +65,55 @@ class ShopApply(BaseModel):
     business_license_asset_id: str = Field(..., min_length=1, max_length=500)
     identity_front_asset_id: str = Field(..., min_length=1, max_length=500)
     identity_back_asset_id: str = Field(..., min_length=1, max_length=500)
+    legal_entity_name: str = Field(..., min_length=2, max_length=200)
+    unified_social_credit_code: str = Field(..., min_length=18, max_length=18, pattern="^[0-9A-Z]{18}$")
+    legal_representative: str = Field(..., min_length=2, max_length=100)
+    registered_address: str = Field(..., min_length=5, max_length=500)
+    business_address: str = Field(..., min_length=5, max_length=500)
+    contact_phone: str = Field(..., min_length=5, max_length=32)
+    business_license_valid_until: date | None = None
+    business_license_long_term: bool = False
 
 
 class ShopUpdate(BaseModel):
     name: str | None = Field(default=None, min_length=2, max_length=100)
     description: str | None = Field(default=None, max_length=500)
     avatar: str | None = Field(default=None, max_length=500)
+
+
+class ShopAgreementSummaryOut(BaseModel):
+    id: int
+    shop_id: int
+    agreement_number: str
+    document_version: str
+    draft_content_sha256: str
+    status: ShopAgreementStatus
+    generated_at: datetime
+    merchant_signed_asset_id: str | None
+    merchant_signed_at: datetime | None
+    platform_signed_asset_id: str | None
+    platform_signed_at: datetime | None
+    final_asset_id: str | None
+    final_file_sha256: str | None
+    archived_at: datetime | None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ShopAgreementOut(ShopAgreementSummaryOut):
+    content_markdown: str
+
+
+class MerchantAgreementSignIn(BaseModel):
+    agreement_number: str = Field(..., min_length=1, max_length=64)
+    document_version: str = Field(..., min_length=1, max_length=32)
+    merchant_signed_asset_id: str = Field(..., min_length=32, max_length=32)
+    confirmed: bool
+
+
+class PlatformAgreementSignIn(BaseModel):
+    platform_signed_asset_id: str = Field(..., min_length=32, max_length=32)
+    agreement_matches: bool
 
 
 class ShopOut(BaseModel):
@@ -78,10 +123,30 @@ class ShopOut(BaseModel):
     avatar: str | None
     description: str | None
     real_name: str | None
-    identity_number: str | None
+    identity_number_masked: str | None
     business_license_asset_id: str | None
     identity_front_asset_id: str | None
     identity_back_asset_id: str | None
+    legal_entity_name: str | None
+    unified_social_credit_code: str | None
+    unified_social_credit_code_masked: str | None
+    legal_representative: str | None
+    registered_address: str | None
+    business_address: str | None
+    contact_phone: str | None
+    business_license_valid_until: date | None
+    business_license_long_term: bool
+    merchant_agreement_version: str | None
+    merchant_agreement_asset_id: str | None
+    agreement_accepted_at: datetime | None
+    onboarding_stage: ShopOnboardingStage
+    current_agreement_id: int | None
+    current_agreement: ShopAgreementSummaryOut | None
+    qualification_valid_until: datetime | None
+    last_qualification_checked_at: datetime | None
+    registration_status: str | None
+    platform_verified: bool
+    qualification_state: str
     status: ShopStatus
     reject_reason: str | None
     deposit_fen: int
@@ -96,6 +161,13 @@ class ShopPublicOut(BaseModel):
     name: str
     avatar: str | None
     description: str | None
+    legal_entity_name: str | None
+    unified_social_credit_code_masked: str | None
+    business_address: str | None
+    registration_status: str | None
+    last_qualification_checked_at: datetime | None
+    qualification_valid_until: datetime | None
+    platform_verified: bool
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -103,6 +175,45 @@ class ShopPublicOut(BaseModel):
 class ShopReviewIn(BaseModel):
     approved: bool
     reject_reason: str | None = Field(default=None, max_length=200)
+    evidence_asset_id: str = Field(..., min_length=32, max_length=32)
+    registration_status: str = Field(..., min_length=1, max_length=100)
+    verification_source: str = Field(default="国家企业信用信息公示系统", min_length=2, max_length=200)
+    entity_name_matches: bool
+    credit_code_matches: bool
+    legal_representative_matches: bool
+    registration_status_valid: bool
+    registered_address_matches: bool
+    business_scope_matches: bool
+    note: str | None = Field(default=None, max_length=1000)
+
+
+class ShopQualificationReviewOut(BaseModel):
+    id: int
+    shop_id: int
+    result: str
+    verification_source: str
+    checked_at: datetime
+    reviewer_user_id: int
+    evidence_asset_id: str
+    registration_status: str
+    checklist: dict[str, bool]
+    note: str | None
+    reject_reason: str | None
+    created_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ShopAdminDetailOut(BaseModel):
+    shop: ShopOut
+    qualification_reviews: list[ShopQualificationReviewOut]
+
+
+class ComplianceSummaryOut(BaseModel):
+    pending_publisher_verifications: int
+    pending_shops: int
+    qualification_expiring_soon: int
+    qualification_expired: int
 
 
 class GoodsSkuIn(BaseModel):

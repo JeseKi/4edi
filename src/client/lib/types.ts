@@ -238,6 +238,8 @@ export interface RegisterWithCodePayload {
   password: string
   code: string
   turnstile_token?: string
+  user_agreement_version: string
+  privacy_policy_version: string
 }
 
 export interface UpdateProfilePayload {
@@ -260,6 +262,8 @@ export interface PhoneRegisterWithCodePayload {
   code: string
   password: string
   turnstile_token?: string
+  user_agreement_version: string
+  privacy_policy_version: string
 }
 
 export interface PhonePasswordResetPayload {
@@ -454,6 +458,21 @@ export interface AsyncTaskDetail extends AsyncTask {
 
 export type MallGoodsStatus = 'draft' | 'on' | 'off'
 export type MallShopStatus = 'pending' | 'approved' | 'rejected' | 'closed'
+export type ShopOnboardingStage =
+  | 'qualification_submitted'
+  | 'qualification_preapproved'
+  | 'agreement_generated'
+  | 'merchant_signed'
+  | 'platform_signed'
+  | 'agreement_archived'
+  | 'approved'
+  | 'rejected'
+export type ShopAgreementStatus =
+  | 'generated'
+  | 'merchant_signed'
+  | 'platform_signed'
+  | 'archived'
+  | 'superseded'
 export type MallOrderStatus =
   | 'pending_payment'
   | 'paid'
@@ -496,20 +515,88 @@ export interface MallShopPublic {
   name: string
   avatar: string | null
   description: string | null
+  legal_entity_name: string | null
+  unified_social_credit_code_masked: string | null
+  business_address: string | null
+  registration_status: string | null
+  last_qualification_checked_at: string | null
+  qualification_valid_until: string | null
+  platform_verified: boolean
+}
+
+export interface ShopAgreementSummary {
+  id: number
+  shop_id: number
+  agreement_number: string
+  document_version: string
+  draft_content_sha256: string
+  status: ShopAgreementStatus
+  generated_at: string
+  merchant_signed_asset_id: string | null
+  merchant_signed_at: string | null
+  platform_signed_asset_id: string | null
+  platform_signed_at: string | null
+  final_asset_id: string | null
+  final_file_sha256: string | null
+  archived_at: string | null
+}
+
+export interface ShopAgreement extends ShopAgreementSummary {
+  content_markdown: string
 }
 
 export interface MallShop extends MallShopPublic {
   owner_user_id: number
   real_name: string | null
-  identity_number: string | null
+  identity_number_masked: string | null
   business_license_asset_id: string | null
   identity_front_asset_id: string | null
   identity_back_asset_id: string | null
+  legal_entity_name: string | null
+  unified_social_credit_code: string | null
+  unified_social_credit_code_masked: string | null
+  legal_representative: string | null
+  registered_address: string | null
+  business_address: string | null
+  contact_phone: string | null
+  business_license_valid_until: string | null
+  business_license_long_term: boolean
+  merchant_agreement_version: string | null
+  merchant_agreement_asset_id: string | null
+  agreement_accepted_at: string | null
+  onboarding_stage: ShopOnboardingStage
+  current_agreement_id: number | null
+  current_agreement: ShopAgreementSummary | null
+  qualification_valid_until: string | null
+  last_qualification_checked_at: string | null
+  registration_status: string | null
+  platform_verified: boolean
+  qualification_state: 'unverified' | 'valid' | 'expired'
   status: MallShopStatus
   reject_reason: string | null
   deposit_fen: number
   approved_at: string | null
   created_at: string
+}
+
+export interface ShopQualificationReview {
+  id: number
+  shop_id: number
+  result: string
+  verification_source: string
+  checked_at: string
+  reviewer_user_id: number
+  evidence_asset_id: string
+  registration_status: string
+  checklist: Record<string, boolean>
+  note: string | null
+  reject_reason: string | null
+  created_at: string
+}
+
+export interface ShopAdminDetail {
+  shop: MallShop
+  qualification_reviews: ShopQualificationReview[]
 }
 
 export interface MallGoods {
@@ -903,10 +990,40 @@ export interface InformationPostDetail extends InformationPost {
 export interface InformationMinePost extends InformationPostDetail {
   status: InfoStatus
   reject_reason: string | null
+  reviewed_by_user_id: number | null
+  reviewed_at: string | null
+  withdrawn_at: string | null
+  withdrawn_reason: string | null
 }
 
 export interface InformationAdminPost extends InformationMinePost {
   poster_user_id: number
+  publisher_verification_id: number | null
+  publisher_real_name: string | null
+  publisher_document_number_masked: string | null
+  publisher_verification_valid: boolean
+}
+
+export type PublisherVerificationStatus = 'pending' | 'approved' | 'rejected'
+
+export interface PublisherVerification {
+  id: number
+  user_id: number
+  username: string
+  real_name: string
+  document_type: string
+  document_number_masked: string
+  document_front_asset_id: string
+  document_back_asset_id: string | null
+  document_valid_until: string | null
+  document_long_term: boolean
+  status: PublisherVerificationStatus
+  submitted_at: string
+  reviewer_user_id: number | null
+  reviewer_username: string | null
+  reviewed_at: string | null
+  reject_reason: string | null
+  is_currently_valid: boolean
 }
 
 export interface InformationPage {

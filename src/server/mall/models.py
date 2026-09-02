@@ -3,7 +3,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from enum import Enum
 from typing import Optional
 
@@ -20,7 +20,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
 )
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from src.server.database import Base
 
@@ -34,6 +34,25 @@ class ShopStatus(str, Enum):
     APPROVED = "approved"
     REJECTED = "rejected"
     CLOSED = "closed"
+
+
+class ShopOnboardingStage(str, Enum):
+    QUALIFICATION_SUBMITTED = "qualification_submitted"
+    QUALIFICATION_PREAPPROVED = "qualification_preapproved"
+    AGREEMENT_GENERATED = "agreement_generated"
+    MERCHANT_SIGNED = "merchant_signed"
+    PLATFORM_SIGNED = "platform_signed"
+    AGREEMENT_ARCHIVED = "agreement_archived"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class ShopAgreementStatus(str, Enum):
+    GENERATED = "generated"
+    MERCHANT_SIGNED = "merchant_signed"
+    PLATFORM_SIGNED = "platform_signed"
+    ARCHIVED = "archived"
+    SUPERSEDED = "superseded"
 
 
 class GoodsStatus(str, Enum):
@@ -179,6 +198,11 @@ class UserCoupon(Base):
 
 class Shop(Base):
     __tablename__ = "mall_shops"
+    __table_args__ = (
+        UniqueConstraint(
+            "unified_social_credit_code", name="uq_mall_shops_credit_code"
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     owner_user_id: Mapped[int] = mapped_column(
@@ -188,10 +212,53 @@ class Shop(Base):
     avatar: Mapped[Optional[str]] = mapped_column(String(500), default=None)
     description: Mapped[Optional[str]] = mapped_column(Text, default=None)
     real_name: Mapped[Optional[str]] = mapped_column(String(50), default=None)
-    identity_number: Mapped[Optional[str]] = mapped_column(String(32), default=None)
+    identity_number_encrypted: Mapped[Optional[str]] = mapped_column(
+        "identity_number", Text, default=None
+    )
+    identity_number_masked: Mapped[Optional[str]] = mapped_column(String(64), default=None)
     business_license_asset_id: Mapped[Optional[str]] = mapped_column(String(500), default=None)
     identity_front_asset_id: Mapped[Optional[str]] = mapped_column(String(500), default=None)
     identity_back_asset_id: Mapped[Optional[str]] = mapped_column(String(500), default=None)
+    legal_entity_name: Mapped[Optional[str]] = mapped_column(String(200), default=None)
+    unified_social_credit_code: Mapped[Optional[str]] = mapped_column(
+        String(18), index=True, default=None
+    )
+    unified_social_credit_code_masked: Mapped[Optional[str]] = mapped_column(
+        String(18), default=None
+    )
+    legal_representative: Mapped[Optional[str]] = mapped_column(String(100), default=None)
+    registered_address: Mapped[Optional[str]] = mapped_column(String(500), default=None)
+    business_address: Mapped[Optional[str]] = mapped_column(String(500), default=None)
+    contact_phone: Mapped[Optional[str]] = mapped_column(String(32), default=None)
+    business_license_valid_until: Mapped[Optional[date]] = mapped_column(default=None)
+    business_license_long_term: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    merchant_agreement_version: Mapped[Optional[str]] = mapped_column(String(32), default=None)
+    merchant_agreement_asset_id: Mapped[Optional[str]] = mapped_column(String(32), default=None)
+    agreement_accepted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    onboarding_stage: Mapped[str] = mapped_column(
+        String(40),
+        nullable=False,
+        default=ShopOnboardingStage.QUALIFICATION_SUBMITTED.value,
+        index=True,
+    )
+    current_agreement_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("shop_agreements.id", ondelete="SET NULL"), default=None
+    )
+    current_agreement: Mapped[Optional["ShopAgreement"]] = relationship(
+        foreign_keys=[current_agreement_id], lazy="selectin"
+    )
+    qualification_valid_until: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), default=None, index=True
+    )
+    last_qualification_review_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("shop_qualification_reviews.id", ondelete="SET NULL"), default=None
+    )
+    last_qualification_checked_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    registration_status: Mapped[Optional[str]] = mapped_column(String(100), default=None)
     status: Mapped[ShopStatus] = mapped_column(
         SQLEnum(ShopStatus), nullable=False, default=ShopStatus.PENDING
     )
@@ -210,6 +277,109 @@ class Shop(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow, onupdate=_utcnow
+    )
+
+    @property
+    def platform_verified(self) -> bool:
+        if self.status != ShopStatus.APPROVED or self.last_qualification_review_id is None:
+            return False
+        if self.qualification_valid_until is None:
+            return False
+        valid_until = self.qualification_valid_until
+        if valid_until.tzinfo is None:
+            valid_until = valid_until.replace(tzinfo=timezone.utc)
+        return valid_until > _utcnow()
+
+    @property
+    def qualification_state(self) -> str:
+        if self.last_qualification_review_id is None or self.qualification_valid_until is None:
+            return "unverified"
+        valid_until = self.qualification_valid_until
+        if valid_until.tzinfo is None:
+            valid_until = valid_until.replace(tzinfo=timezone.utc)
+        if valid_until <= _utcnow():
+            return "expired"
+        return "valid"
+
+
+class ShopAgreement(Base):
+    __tablename__ = "shop_agreements"
+    __table_args__ = (
+        UniqueConstraint("agreement_number", name="uq_shop_agreement_number"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    shop_id: Mapped[int] = mapped_column(
+        ForeignKey("mall_shops.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    agreement_number: Mapped[str] = mapped_column(String(64), nullable=False)
+    document_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    content_markdown: Mapped[str] = mapped_column(Text, nullable=False)
+    draft_content_sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default=ShopAgreementStatus.GENERATED.value
+    )
+    generated_by_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    generated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+    merchant_signed_asset_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("file_assets.id", ondelete="RESTRICT"), default=None
+    )
+    merchant_signed_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), default=None
+    )
+    merchant_signed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    platform_signed_asset_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("file_assets.id", ondelete="RESTRICT"), default=None
+    )
+    platform_signed_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), default=None
+    )
+    platform_signed_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    final_asset_id: Mapped[Optional[str]] = mapped_column(
+        ForeignKey("file_assets.id", ondelete="RESTRICT"), default=None
+    )
+    final_file_sha256: Mapped[Optional[str]] = mapped_column(String(64), default=None)
+    archived_by_user_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), default=None
+    )
+    archived_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True), default=None
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
+    )
+
+
+class ShopQualificationReview(Base):
+    __tablename__ = "shop_qualification_reviews"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    shop_id: Mapped[int] = mapped_column(
+        ForeignKey("mall_shops.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    result: Mapped[str] = mapped_column(String(20), nullable=False)
+    verification_source: Mapped[str] = mapped_column(String(200), nullable=False)
+    checked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    reviewer_user_id: Mapped[int] = mapped_column(
+        ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    evidence_asset_id: Mapped[str] = mapped_column(
+        ForeignKey("file_assets.id", ondelete="RESTRICT"), nullable=False
+    )
+    registration_status: Mapped[str] = mapped_column(String(100), nullable=False)
+    checklist: Mapped[dict] = mapped_column(JSON, nullable=False, default=dict)
+    note: Mapped[Optional[str]] = mapped_column(Text, default=None)
+    reject_reason: Mapped[Optional[str]] = mapped_column(Text, default=None)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, default=_utcnow
     )
 
 

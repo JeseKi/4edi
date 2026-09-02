@@ -8,7 +8,8 @@
 from __future__ import annotations
 
 import secrets
-from datetime import datetime, timedelta, timezone
+from calendar import monthrange
+from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import HTTPException, status
 from loguru import logger
@@ -16,6 +17,10 @@ from sqlalchemy.orm import Session
 
 from src.server.auth.dependencies.current_user import AuthenticatedPrincipal
 from src.server.auth.schemas import UserRole
+from src.server.auth.service import short_transactions as auth_transactions
+from src.server.compliance import encrypt_sensitive_value
+from src.server.compliance.config import compliance_config
+from src.server.files.service import short_transactions as file_transactions
 from src.server.task_runtime import TaskReference, TaskRuntime
 
 from ..config import mall_config
@@ -68,6 +73,10 @@ from ..models import (
     RefundStatus,
     RefundType,
     Shop,
+    ShopAgreement,
+    ShopAgreementStatus,
+    ShopOnboardingStage,
+    ShopQualificationReview,
     ShopStatus,
     UserCoupon,
     UserCouponStatus,
@@ -75,6 +84,7 @@ from ..models import (
     WithdrawRequest,
     WithdrawStatus,
 )
+from ..agreements import build_agreement_snapshot
 from .long_tasks import (
     MALL_ORDER_AUTO_CONFIRM,
     MALL_ORDER_PAYMENT_TIMEOUT,
@@ -104,6 +114,129 @@ def _as_utc(value: datetime) -> datetime:
     return value.astimezone(timezone.utc)
 
 
+def _add_months(value: datetime, months: int) -> datetime:
+    month_index = value.month - 1 + months
+    year = value.year + month_index // 12
+    month = month_index % 12 + 1
+    day = min(value.day, monthrange(year, month)[1])
+    return value.replace(year=year, month=month, day=day)
+
+
+def is_shop_operational(shop: Shop) -> bool:
+    return shop.platform_verified
+
+
+def assert_shop_operational(shop: Shop) -> None:
+    if not is_shop_operational(shop):
+        raise HTTPException(status_code=403, detail="店铺资质未通过、已过期或正在复核")
+
+
+def _mask_identity_number(value: str) -> str:
+    normalized = "".join(value.strip().upper().split())
+    if len(normalized) <= 7:
+        return normalized[:1] + "*" * max(0, len(normalized) - 2) + normalized[-1:]
+    return f"{normalized[:3]}{'*' * (len(normalized) - 7)}{normalized[-4:]}"
+
+
+def _mask_credit_code(value: str) -> str:
+    return f"{value[:4]}{'*' * 10}{value[-4:]}"
+
+
+def _validate_shop_application(db: Session, user_id: int, payload: dict) -> list[str]:
+    auth_transactions.assert_current_user_acceptances(db, user_id)
+    long_term = bool(payload.get("business_license_long_term"))
+    valid_until = payload.get("business_license_valid_until")
+    if not long_term and valid_until is None:
+        raise HTTPException(status_code=422, detail="请填写营业执照有效期或选择长期有效")
+    if valid_until is not None and valid_until < date.today():
+        raise HTTPException(status_code=422, detail="营业执照已过期")
+    credit_code = payload["unified_social_credit_code"].strip().upper()
+    if len(credit_code) != 18 or not credit_code.isalnum():
+        raise HTTPException(status_code=422, detail="统一社会信用代码格式不正确")
+    duplicate = (
+        db.query(Shop.id)
+        .filter(Shop.unified_social_credit_code == credit_code)
+        .first()
+    )
+    existing = ShopDAO(db).get_by_owner(user_id)
+    if duplicate is not None and (existing is None or duplicate[0] != existing.id):
+        raise HTTPException(status_code=409, detail="该企业已申请过店铺")
+    asset_ids = [
+        payload["business_license_asset_id"],
+        payload["identity_front_asset_id"],
+        payload["identity_back_asset_id"],
+    ]
+    if len(set(asset_ids)) != len(asset_ids):
+        raise HTTPException(status_code=422, detail="各项资质材料必须分别上传")
+    file_transactions.assert_owned_available_assets(
+        db, owner_user_id=user_id, asset_ids=asset_ids, compliance_material=True
+    )
+    return asset_ids
+
+
+def _write_shop_application(
+    db: Session,
+    shop: Shop,
+    payload: dict,
+    *,
+    client_ip: str | None,
+    user_agent: str | None,
+) -> Shop:
+    identity_number = payload["identity_number"].strip().upper()
+    credit_code = payload["unified_social_credit_code"].strip().upper()
+    for field in (
+        "name",
+        "description",
+        "avatar",
+        "real_name",
+        "business_license_asset_id",
+        "identity_front_asset_id",
+        "identity_back_asset_id",
+        "legal_entity_name",
+        "legal_representative",
+        "registered_address",
+        "business_address",
+        "contact_phone",
+        "business_license_valid_until",
+        "business_license_long_term",
+    ):
+        setattr(shop, field, payload.get(field))
+    shop.identity_number_encrypted = encrypt_sensitive_value(identity_number)
+    shop.identity_number_masked = _mask_identity_number(identity_number)
+    shop.unified_social_credit_code = credit_code
+    shop.unified_social_credit_code_masked = _mask_credit_code(credit_code)
+    del client_ip, user_agent
+    shop.status = ShopStatus.PENDING
+    shop.onboarding_stage = ShopOnboardingStage.QUALIFICATION_SUBMITTED.value
+    shop.reject_reason = None
+    shop.qualification_valid_until = None
+    shop.last_qualification_review_id = None
+    shop.last_qualification_checked_at = None
+    shop.registration_status = None
+    shop.merchant_agreement_version = None
+    shop.merchant_agreement_asset_id = None
+    shop.agreement_accepted_at = None
+    if shop.current_agreement is not None:
+        shop.current_agreement.status = ShopAgreementStatus.SUPERSEDED.value
+    shop.current_agreement_id = None
+    db.flush()
+    purposes = {
+        shop.business_license_asset_id: "business_license",
+        shop.identity_front_asset_id: "identity_front",
+        shop.identity_back_asset_id: "identity_back",
+    }
+    for asset_id, purpose in purposes.items():
+        if asset_id:
+            file_transactions.attach_asset_reference(
+                db,
+                asset_id=asset_id,
+                resource_type="shop_qualification",
+                resource_id=shop.id,
+                purpose=purpose,
+            )
+    return shop
+
+
 # ---------------------------------------------------------------------------
 # 店铺
 # ---------------------------------------------------------------------------
@@ -129,34 +262,55 @@ def resolve_seller_shop(db: Session, principal: AuthenticatedPrincipal, shop_id:
 def apply_shop(
     db: Session,
     principal: AuthenticatedPrincipal,
+    payload: dict,
     *,
-    name: str,
-    description: str | None,
-    avatar: str | None,
-    real_name: str,
-    identity_number: str,
-    business_license_asset_id: str,
-    identity_front_asset_id: str,
-    identity_back_asset_id: str,
+    client_ip: str | None,
+    user_agent: str | None,
 ) -> Shop:
+    _validate_shop_application(db, principal.user_id, payload)
     shop_dao = ShopDAO(db)
     existing = shop_dao.get_by_owner(principal.user_id)
     if existing is not None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="已申请过店铺")
     try:
-        return shop_dao.create(
+        shop = shop_dao.create(
             owner_user_id=principal.user_id,
-            name=name,
-            description=description,
-            avatar=avatar,
-            real_name=real_name,
-            identity_number=identity_number,
-            business_license_asset_id=business_license_asset_id,
-            identity_front_asset_id=identity_front_asset_id,
-            identity_back_asset_id=identity_back_asset_id,
+            name=payload["name"],
+            description=payload.get("description"),
+            avatar=payload.get("avatar"),
+        )
+        return _write_shop_application(
+            db, shop, payload, client_ip=client_ip, user_agent=user_agent
         )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
+
+
+def resubmit_shop_qualification(
+    db: Session,
+    principal: AuthenticatedPrincipal,
+    payload: dict,
+    *,
+    client_ip: str | None,
+    user_agent: str | None,
+) -> Shop:
+    _validate_shop_application(db, principal.user_id, payload)
+    shop = ShopDAO(db).get_by_owner(principal.user_id)
+    if shop is None:
+        raise HTTPException(status_code=404, detail="尚未申请店铺")
+    if shop.status == ShopStatus.PENDING:
+        raise HTTPException(status_code=409, detail="店铺资料正在审核")
+    if is_shop_operational(shop):
+        raise HTTPException(status_code=409, detail="当前店铺资质仍然有效")
+    file_transactions.release_asset_references(
+        db,
+        resource_type="shop_qualification",
+        resource_id=shop.id,
+        retain_until=_utcnow() + timedelta(days=compliance_config.material_retention_days),
+    )
+    return _write_shop_application(
+        db, shop, payload, client_ip=client_ip, user_agent=user_agent
+    )
 
 
 def get_my_shop(db: Session, principal: AuthenticatedPrincipal) -> Shop:
@@ -168,7 +322,7 @@ def get_my_shop(db: Session, principal: AuthenticatedPrincipal) -> Shop:
 
 def get_public_shop(db: Session, shop_id: int) -> Shop:
     shop = ShopDAO(db).get(shop_id)
-    if shop is None or shop.status != ShopStatus.APPROVED:
+    if shop is None or not is_shop_operational(shop):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="店铺不存在")
     return shop
 
@@ -183,8 +337,7 @@ def update_shop(
     shop_id: int | None = None,
 ) -> Shop:
     shop = resolve_seller_shop(db, principal, shop_id)
-    if shop.status != ShopStatus.APPROVED:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="店铺未通过审核")
+    assert_shop_operational(shop)
     if name is not None:
         shop.name = name
     if description is not None:
@@ -198,39 +351,401 @@ def admin_list_shops(
     db: Session,
     *,
     status_filter: ShopStatus | None,
+    qualification_state: str | None,
     keyword: str | None,
     page: int,
     page_size: int,
 ) -> tuple[list[Shop], int]:
-    return ShopDAO(db).list(status=status_filter, keyword=keyword, page=page, page_size=page_size)
+    return ShopDAO(db).list(
+        status=status_filter,
+        qualification_state=qualification_state,
+        keyword=keyword,
+        page=page,
+        page_size=page_size,
+    )
+
+
+def admin_shop_detail(
+    db: Session, shop_id: int
+) -> tuple[Shop, list[ShopQualificationReview]]:
+    shop = ShopDAO(db).get(shop_id)
+    if shop is None:
+        raise HTTPException(status_code=404, detail="店铺不存在")
+    reviews = (
+        db.query(ShopQualificationReview)
+        .filter(ShopQualificationReview.shop_id == shop_id)
+        .order_by(
+            ShopQualificationReview.checked_at.desc(),
+            ShopQualificationReview.id.desc(),
+        )
+        .all()
+    )
+    return shop, reviews
+
+
+def compliance_summary(db: Session) -> dict[str, int]:
+    from src.server.information.models import (
+        PublisherVerification,
+        PublisherVerificationStatus,
+    )
+
+    now = _utcnow()
+    soon = now + timedelta(days=30)
+    return {
+        "pending_publisher_verifications": db.query(PublisherVerification)
+        .filter(PublisherVerification.status == PublisherVerificationStatus.PENDING)
+        .count(),
+        "pending_shops": db.query(Shop)
+        .filter(Shop.status == ShopStatus.PENDING)
+        .count(),
+        "qualification_expiring_soon": db.query(Shop)
+        .filter(
+            Shop.status == ShopStatus.APPROVED,
+            Shop.qualification_valid_until > now,
+            Shop.qualification_valid_until <= soon,
+        )
+        .count(),
+        "qualification_expired": db.query(Shop)
+        .filter(
+            Shop.status == ShopStatus.APPROVED,
+            Shop.qualification_valid_until <= now,
+        )
+        .count(),
+    }
 
 
 def admin_review_shop(
-    db: Session, shop_id: int, *, approved: bool, reject_reason: str | None, handler_user_id: int
+    db: Session,
+    shop_id: int,
+    *,
+    payload: dict,
+    handler_user_id: int,
 ) -> Shop:
     shop = ShopDAO(db).lock(shop_id)
     if shop is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="店铺不存在")
-    if shop.status not in (ShopStatus.PENDING, ShopStatus.REJECTED):
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="店铺不是待审核状态")
+    if (
+        shop.status != ShopStatus.PENDING
+        or shop.onboarding_stage
+        != ShopOnboardingStage.QUALIFICATION_SUBMITTED.value
+    ):
+        raise HTTPException(status_code=409, detail="当前阶段不能进行资质预审")
+    evidence_asset_id = payload["evidence_asset_id"]
+    file_transactions.assert_owned_available_assets(
+        db,
+        owner_user_id=handler_user_id,
+        asset_ids=[evidence_asset_id],
+        compliance_material=True,
+    )
+    checklist = {
+        key: bool(payload[key])
+        for key in (
+            "entity_name_matches",
+            "credit_code_matches",
+            "legal_representative_matches",
+            "registration_status_valid",
+            "registered_address_matches",
+            "business_scope_matches",
+        )
+    }
+    approved = bool(payload["approved"])
+    if approved and not all(checklist.values()):
+        raise HTTPException(status_code=422, detail="全部企业核验项目一致后才能通过预审")
+    reject_reason = (payload.get("reject_reason") or "").strip()
+    if not approved and not reject_reason:
+        raise HTTPException(status_code=422, detail="驳回时必须填写原因")
+    checked_at = _utcnow()
+    review = ShopQualificationReview(
+        shop_id=shop.id,
+        result="preapproved" if approved else "rejected",
+        verification_source=payload["verification_source"].strip(),
+        checked_at=checked_at,
+        reviewer_user_id=handler_user_id,
+        evidence_asset_id=evidence_asset_id,
+        registration_status=payload["registration_status"].strip(),
+        checklist=checklist,
+        note=(payload.get("note") or "").strip() or None,
+        reject_reason=reject_reason or None,
+    )
+    db.add(review)
+    db.flush()
+    file_transactions.attach_asset_reference(
+        db,
+        asset_id=evidence_asset_id,
+        resource_type="shop_qualification_review",
+        resource_id=review.id,
+        purpose="enterprise_registry_evidence",
+    )
     if approved:
-        shop.status = ShopStatus.APPROVED
-        shop.approved_at = _utcnow()
+        shop.onboarding_stage = ShopOnboardingStage.QUALIFICATION_PREAPPROVED.value
         shop.reject_reason = None
-        shop.deposit_fen = mall_config.default_deposit_fen
-        wallet = WalletDAO(db).get_or_create(shop.id)
-        wallet.deposit_fen = mall_config.default_deposit_fen
-        if mall_config.default_deposit_fen > 0:
-            WalletLedgerDAO(db).create(
-                shop_id=shop.id,
-                entry_type=LedgerType.DEPOSIT,
-                status=LedgerStatus.WITHDRAWN,
-                amount_fen=-mall_config.default_deposit_fen,
-                note="入驻保证金",
-            )
+        shop.last_qualification_review_id = review.id
+        shop.last_qualification_checked_at = checked_at
+        shop.registration_status = review.registration_status
     else:
         shop.status = ShopStatus.REJECTED
-        shop.reject_reason = reject_reason or "资料不完整"
+        shop.onboarding_stage = ShopOnboardingStage.REJECTED.value
+        shop.reject_reason = reject_reason
+        shop.qualification_valid_until = None
+        file_transactions.release_asset_references(
+            db,
+            resource_type="shop_qualification",
+            resource_id=shop.id,
+            retain_until=checked_at
+            + timedelta(days=compliance_config.material_retention_days),
+        )
+    return shop
+
+
+def _current_shop_agreement(db: Session, shop: Shop) -> ShopAgreement:
+    if shop.current_agreement_id is None:
+        raise HTTPException(status_code=409, detail="当前店铺尚未生成协议")
+    agreement = db.get(ShopAgreement, shop.current_agreement_id)
+    if agreement is None or agreement.shop_id != shop.id:
+        raise HTTPException(status_code=409, detail="当前协议档案不存在")
+    return agreement
+
+
+def get_my_shop_agreement(
+    db: Session, principal: AuthenticatedPrincipal
+) -> ShopAgreement:
+    shop = get_my_shop(db, principal)
+    return _current_shop_agreement(db, shop)
+
+
+def get_my_shop_signed_agreement_snapshot(
+    db: Session, principal: AuthenticatedPrincipal
+) -> file_transactions.FileAssetSnapshot:
+    """返回当前商家有权读取的双方签署协议文件。"""
+    shop = get_my_shop(db, principal)
+    agreement = _current_shop_agreement(db, shop)
+    if shop.onboarding_stage not in {
+        ShopOnboardingStage.PLATFORM_SIGNED.value,
+        ShopOnboardingStage.AGREEMENT_ARCHIVED.value,
+        ShopOnboardingStage.APPROVED.value,
+    }:
+        raise HTTPException(status_code=409, detail="平台签署完成后才能查看双方签署协议")
+    asset_id = agreement.final_asset_id or agreement.platform_signed_asset_id
+    if asset_id is None:
+        raise HTTPException(status_code=409, detail="双方签署协议文件尚未生成")
+    return file_transactions.get_available_asset_snapshot(db, asset_id)
+
+
+def admin_generate_shop_agreement(
+    db: Session, shop_id: int, *, handler_user_id: int
+) -> ShopAgreement:
+    shop = ShopDAO(db).lock(shop_id)
+    if shop is None:
+        raise HTTPException(status_code=404, detail="店铺不存在")
+    if (
+        shop.onboarding_stage
+        != ShopOnboardingStage.QUALIFICATION_PREAPPROVED.value
+    ):
+        raise HTTPException(status_code=409, detail="资质预审通过后才能生成协议")
+    snapshot = build_agreement_snapshot(shop)
+    agreement = ShopAgreement(
+        shop_id=shop.id,
+        agreement_number=snapshot.agreement_number,
+        document_version=snapshot.document_version,
+        content_markdown=snapshot.content_markdown,
+        draft_content_sha256=snapshot.draft_content_sha256,
+        status=ShopAgreementStatus.GENERATED.value,
+        generated_by_user_id=handler_user_id,
+        generated_at=_utcnow(),
+    )
+    db.add(agreement)
+    db.flush()
+    shop.current_agreement_id = agreement.id
+    shop.current_agreement = agreement
+    shop.merchant_agreement_version = agreement.document_version
+    shop.onboarding_stage = ShopOnboardingStage.AGREEMENT_GENERATED.value
+    return agreement
+
+
+def merchant_sign_shop_agreement(
+    db: Session,
+    principal: AuthenticatedPrincipal,
+    payload: dict,
+    *,
+    client_ip: str | None,
+    user_agent: str | None,
+) -> Shop:
+    shop = ShopDAO(db).get_by_owner(principal.user_id)
+    if shop is None:
+        raise HTTPException(status_code=404, detail="尚未申请店铺")
+    if shop.onboarding_stage != ShopOnboardingStage.AGREEMENT_GENERATED.value:
+        raise HTTPException(status_code=409, detail="当前阶段不能提交商家签署协议")
+    agreement = _current_shop_agreement(db, shop)
+    if not payload.get("confirmed"):
+        raise HTTPException(status_code=422, detail="请确认上传的是当前协议定稿")
+    if (
+        payload["agreement_number"] != agreement.agreement_number
+        or payload["document_version"] != agreement.document_version
+    ):
+        raise HTTPException(status_code=422, detail="协议编号或版本不匹配")
+    asset_id = payload["merchant_signed_asset_id"]
+    file_transactions.assert_owned_available_assets(
+        db,
+        owner_user_id=principal.user_id,
+        asset_ids=[asset_id],
+        compliance_material=True,
+    )
+    agreement.merchant_signed_asset_id = asset_id
+    agreement.merchant_signed_by_user_id = principal.user_id
+    agreement.merchant_signed_at = _utcnow()
+    agreement.status = ShopAgreementStatus.MERCHANT_SIGNED.value
+    file_transactions.attach_asset_reference(
+        db,
+        asset_id=asset_id,
+        resource_type="shop_agreement",
+        resource_id=agreement.id,
+        purpose="merchant_signed",
+    )
+    acceptance = auth_transactions.record_document_acceptance(
+        db,
+        user_id=principal.user_id,
+        document_type="merchant_agreement",
+        document_version=agreement.document_version,
+        client_ip=client_ip,
+        user_agent=user_agent,
+    )
+    shop.agreement_accepted_at = acceptance.accepted_at
+    shop.onboarding_stage = ShopOnboardingStage.MERCHANT_SIGNED.value
+    return shop
+
+
+def admin_platform_sign_shop_agreement(
+    db: Session,
+    shop_id: int,
+    payload: dict,
+    *,
+    handler_user_id: int,
+) -> Shop:
+    shop = ShopDAO(db).lock(shop_id)
+    if shop is None:
+        raise HTTPException(status_code=404, detail="店铺不存在")
+    if shop.onboarding_stage != ShopOnboardingStage.MERCHANT_SIGNED.value:
+        raise HTTPException(status_code=409, detail="商家签署后才能提交平台签署文件")
+    if not payload.get("agreement_matches"):
+        raise HTTPException(status_code=422, detail="必须确认协议编号、版本和双方主体一致")
+    agreement = _current_shop_agreement(db, shop)
+    asset_id = payload["platform_signed_asset_id"]
+    if asset_id == agreement.merchant_signed_asset_id:
+        raise HTTPException(status_code=422, detail="平台签署后应上传新的双方签署文件")
+    file_transactions.assert_owned_available_assets(
+        db,
+        owner_user_id=handler_user_id,
+        asset_ids=[asset_id],
+        compliance_material=True,
+    )
+    agreement.platform_signed_asset_id = asset_id
+    agreement.platform_signed_by_user_id = handler_user_id
+    agreement.platform_signed_at = _utcnow()
+    agreement.status = ShopAgreementStatus.PLATFORM_SIGNED.value
+    file_transactions.attach_asset_reference(
+        db,
+        asset_id=asset_id,
+        resource_type="shop_agreement",
+        resource_id=agreement.id,
+        purpose="platform_signed",
+    )
+    shop.onboarding_stage = ShopOnboardingStage.PLATFORM_SIGNED.value
+    return shop
+
+
+def prepare_shop_agreement_archive(
+    db: Session, shop_id: int
+) -> file_transactions.FileAssetSnapshot:
+    """在文件 I/O 前确认归档阶段，并返回最终文件的稳定元数据。"""
+    shop = ShopDAO(db).lock(shop_id)
+    if shop is None:
+        raise HTTPException(status_code=404, detail="店铺不存在")
+    if shop.onboarding_stage != ShopOnboardingStage.PLATFORM_SIGNED.value:
+        raise HTTPException(status_code=409, detail="平台签署完成后才能归档")
+    agreement = _current_shop_agreement(db, shop)
+    if agreement.platform_signed_asset_id is None:
+        raise HTTPException(status_code=409, detail="缺少双方签署的最终协议")
+    return file_transactions.get_available_asset_snapshot(
+        db, agreement.platform_signed_asset_id
+    )
+
+
+def admin_archive_shop_agreement(
+    db: Session,
+    shop_id: int,
+    *,
+    handler_user_id: int,
+    expected_asset_id: str,
+    final_file_sha256: str,
+) -> Shop:
+    shop = ShopDAO(db).lock(shop_id)
+    if shop is None:
+        raise HTTPException(status_code=404, detail="店铺不存在")
+    if shop.onboarding_stage != ShopOnboardingStage.PLATFORM_SIGNED.value:
+        raise HTTPException(status_code=409, detail="平台签署完成后才能归档")
+    agreement = _current_shop_agreement(db, shop)
+    if agreement.platform_signed_asset_id is None:
+        raise HTTPException(status_code=409, detail="缺少双方签署的最终协议")
+    if agreement.platform_signed_asset_id != expected_asset_id:
+        raise HTTPException(status_code=409, detail="最终协议文件已发生变化，请重新归档")
+    if len(final_file_sha256) != 64:
+        raise HTTPException(status_code=422, detail="最终协议文件校验值无效")
+    agreement.final_asset_id = agreement.platform_signed_asset_id
+    agreement.final_file_sha256 = final_file_sha256
+    agreement.archived_by_user_id = handler_user_id
+    agreement.archived_at = _utcnow()
+    agreement.status = ShopAgreementStatus.ARCHIVED.value
+    shop.merchant_agreement_asset_id = agreement.final_asset_id
+    shop.onboarding_stage = ShopOnboardingStage.AGREEMENT_ARCHIVED.value
+    file_transactions.attach_asset_reference(
+        db,
+        asset_id=agreement.final_asset_id,
+        resource_type="shop_agreement",
+        resource_id=agreement.id,
+        purpose="final_archived",
+    )
+    return shop
+
+
+def admin_approve_shop(db: Session, shop_id: int) -> Shop:
+    shop = ShopDAO(db).lock(shop_id)
+    if shop is None:
+        raise HTTPException(status_code=404, detail="店铺不存在")
+    if shop.onboarding_stage != ShopOnboardingStage.AGREEMENT_ARCHIVED.value:
+        raise HTTPException(status_code=409, detail="最终协议归档后才能批准商家")
+    if shop.last_qualification_review_id is None:
+        raise HTTPException(status_code=409, detail="缺少资质预审记录")
+    review = db.get(ShopQualificationReview, shop.last_qualification_review_id)
+    if review is None or review.result != "preapproved":
+        raise HTTPException(status_code=409, detail="资质预审记录无效")
+    valid_until = _add_months(
+        _as_utc(review.checked_at), compliance_config.qualification_valid_months
+    )
+    if not shop.business_license_long_term and shop.business_license_valid_until:
+        license_deadline = datetime.combine(
+            shop.business_license_valid_until, time.max, tzinfo=timezone.utc
+        )
+        valid_until = min(valid_until, license_deadline)
+    if valid_until <= _utcnow():
+        raise HTTPException(status_code=409, detail="企业资质预审已过期，请重新提交核验")
+    approved_at = _utcnow()
+    shop.status = ShopStatus.APPROVED
+    shop.onboarding_stage = ShopOnboardingStage.APPROVED.value
+    shop.approved_at = approved_at
+    shop.reject_reason = None
+    shop.qualification_valid_until = valid_until
+    should_initialize_deposit = shop.deposit_fen == 0
+    shop.deposit_fen = mall_config.default_deposit_fen
+    wallet = WalletDAO(db).get_or_create(shop.id)
+    wallet.deposit_fen = mall_config.default_deposit_fen
+    if should_initialize_deposit and mall_config.default_deposit_fen > 0:
+        WalletLedgerDAO(db).create(
+            shop_id=shop.id,
+            entry_type=LedgerType.DEPOSIT,
+            status=LedgerStatus.WITHDRAWN,
+            amount_fen=-mall_config.default_deposit_fen,
+            note="入驻保证金",
+        )
     return shop
 
 
@@ -255,6 +770,11 @@ def admin_reopen_shop(db: Session, shop_id: int) -> Shop:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="店铺不存在")
     if shop.status != ShopStatus.CLOSED:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="仅可开启已关闭店铺")
+    if not shop.last_qualification_review_id or not shop.qualification_valid_until:
+        raise HTTPException(status_code=400, detail="店铺必须重新提交并通过资质审核")
+    valid_until = _as_utc(shop.qualification_valid_until)
+    if valid_until <= _utcnow():
+        raise HTTPException(status_code=400, detail="店铺资质已过期，请重新提交审核")
     shop.status = ShopStatus.APPROVED
     shop.closed_at = None
     return shop
@@ -303,7 +823,7 @@ def get_goods_detail(db: Session, goods_id: int) -> tuple[Goods, list[GoodsSku],
     if goods is None or goods.deleted_at is not None or goods.status != GoodsStatus.ON:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="商品不存在或已下架")
     shop = ShopDAO(db).get(goods.shop_id)
-    if shop is None or shop.status != ShopStatus.APPROVED:
+    if shop is None or not is_shop_operational(shop):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="商品不存在或已下架")
     skus = GoodsSkuDAO(db).list_by_goods(goods.id)
     return goods, skus, shop
@@ -339,8 +859,7 @@ def create_goods(
     db: Session, principal: AuthenticatedPrincipal, payload: dict, *, shop_id: int | None = None
 ) -> Goods:
     shop = resolve_seller_shop(db, principal, shop_id)
-    if shop.status != ShopStatus.APPROVED:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="店铺未通过审核")
+    assert_shop_operational(shop)
     goods = GoodsDAO(db).create(
         shop_id=shop.id,
         category_id=payload.get("category_id"),
@@ -394,6 +913,8 @@ def list_shop_goods(
 def update_goods(
     db: Session, principal: AuthenticatedPrincipal, goods_id: int, payload: dict, *, shop_id: int | None = None
 ) -> Goods:
+    shop = resolve_seller_shop(db, principal, shop_id)
+    assert_shop_operational(shop)
     goods = get_shop_goods(db, principal, goods_id, shop_id=shop_id)
     for field in ("category_id", "name", "main_image", "images", "detail", "original_price_fen"):
         if field in payload:
@@ -406,6 +927,9 @@ def update_goods(
 def set_goods_status(
     db: Session, principal: AuthenticatedPrincipal, goods_id: int, *, on: bool, shop_id: int | None = None
 ) -> Goods:
+    shop = resolve_seller_shop(db, principal, shop_id)
+    if on:
+        assert_shop_operational(shop)
     goods = get_shop_goods(db, principal, goods_id, shop_id=shop_id)
     if on:
         if goods.stock <= 0:
@@ -433,6 +957,9 @@ def add_cart_item(
     goods = GoodsDAO(db).get(goods_id)
     if goods is None or goods.deleted_at is not None or goods.status != GoodsStatus.ON:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="商品已下架")
+    shop = ShopDAO(db).get(goods.shop_id)
+    if shop is None or not is_shop_operational(shop):
+        raise HTTPException(status_code=400, detail="店铺资质未通过或已过期")
     sku = GoodsSkuDAO(db).get(sku_id)
     if sku is None or sku.goods_id != goods_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="SKU 不存在")
@@ -467,7 +994,12 @@ def list_cart(db: Session, user_id: int) -> list[dict]:
                 "price_fen": sku.price_fen if sku else 0,
                 "subtotal_fen": (sku.price_fen if sku else 0) * item.quantity,
                 "stock": sku.stock if sku else 0,
-                "goods_on": goods.status == GoodsStatus.ON and goods.deleted_at is None,
+                "goods_on": bool(
+                    goods.status == GoodsStatus.ON
+                    and goods.deleted_at is None
+                    and shop is not None
+                    and is_shop_operational(shop)
+                ),
             }
         )
     return result
@@ -579,6 +1111,9 @@ def _validate_order_items(db: Session, items: list[dict]) -> tuple[int, list[dic
         )
     if shop_id is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="订单商品为空")
+    shop = ShopDAO(db).get(shop_id)
+    if shop is None or not is_shop_operational(shop):
+        raise HTTPException(status_code=400, detail="店铺资质未通过或已过期")
     return shop_id, order_items
 
 
@@ -1814,9 +2349,14 @@ def _check_favorite_target(db: Session, target_type: FavoriteTargetType, target_
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="商品不存在或已下架"
             )
+        shop = ShopDAO(db).get(goods.shop_id)
+        if shop is None or not is_shop_operational(shop):
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND, detail="商品不存在或已下架"
+            )
     else:
         shop = ShopDAO(db).get(target_id)
-        if shop is None or shop.status != ShopStatus.APPROVED:
+        if shop is None or not is_shop_operational(shop):
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail="店铺不存在或未通过审核"
             )
@@ -2147,6 +2687,7 @@ def seller_create_coupon(
     db: Session, principal: AuthenticatedPrincipal, payload: dict, *, shop_id: int | None = None
 ) -> CouponTemplate:
     shop = resolve_seller_shop(db, principal, shop_id)
+    assert_shop_operational(shop)
     payload["scope"] = CouponScope.SHOP
     payload["shop_id"] = shop.id
     _validate_coupon_fields(payload)
@@ -2185,6 +2726,8 @@ def seller_update_coupon(
     *,
     shop_id: int | None = None,
 ) -> CouponTemplate:
+    shop = resolve_seller_shop(db, principal, shop_id)
+    assert_shop_operational(shop)
     coupon = _get_shop_coupon(db, principal, coupon_id, shop_id=shop_id)
     _validate_coupon_fields(payload)
     for field in (
@@ -2222,6 +2765,9 @@ def seller_set_coupon_status(
     on: bool,
     shop_id: int | None = None,
 ) -> CouponTemplate:
+    shop = resolve_seller_shop(db, principal, shop_id)
+    if on:
+        assert_shop_operational(shop)
     coupon = _get_shop_coupon(db, principal, coupon_id, shop_id=shop_id)
     if on:
         if coupon.status != CouponStatus.PAUSED:
