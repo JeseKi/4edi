@@ -34,6 +34,10 @@ def _single_line(value: str | None) -> str:
 
 
 def build_agreement_snapshot(shop: AgreementShop) -> AgreementSnapshot:
+    if not compliance_config.legal_entity_credit_code.strip():
+        raise ValueError(
+            "平台统一社会信用代码未配置，暂不能生成正式商家入驻协议"
+        )
     document = get_legal_document("merchant_agreement")
     version = str(document["version"])
     agreement_number = (
@@ -43,7 +47,7 @@ def build_agreement_snapshot(shop: AgreementShop) -> AgreementSnapshot:
 
 ---
 
-## 九、协议定稿与签署页
+## 九、签约主体与电子确认
 
 协议编号：{agreement_number}\\
 协议版本：{version}\\
@@ -64,14 +68,7 @@ def build_agreement_snapshot(shop: AgreementShop) -> AgreementSnapshot:
 注册地址：{_single_line(shop.registered_address)}\\
 实际经营地址：{_single_line(shop.business_address)}
 
-甲方盖章：____________________\\
-签署日期：______年____月____日
-
-乙方盖章：____________________\\
-法定代表人或授权代表签字：____________________\\
-签署日期：______年____月____日
-
-> 本协议以协议编号所对应的完整协议文本及双方最终签署文件为准。未经双方书面确认，任何一方不得擅自增删或修改协议内容。
+平台将本协议完整文本作为签约要约向乙方展示。乙方已完成实名认证的店主账号阅读完整协议，主动勾选并点击“确认签署电子协议”后，本协议即由双方以电子方式签署、成立并生效。系统将协议编号、版本、完整正文及签约留痕一并归档，双方均可在线查看、打印或保存。
 """
     content = str(document["content_markdown"]).rstrip() + signature_page
     draft_content_sha256 = hashlib.sha256(content.encode("utf-8")).hexdigest()

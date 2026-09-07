@@ -209,11 +209,19 @@ def test_client(
     )
     from src.server.platform.runtime import ApplicationRuntime
     from src.server.config import global_config
+    from src.server.compliance.config import compliance_config
     from src.server.auth.service import sms
     from src.server.task_runtime import TaskRuntime
 
     # 测试不应因开发机遗留的商户凭据而调用微信支付网络接口。
     monkeypatch.setattr(global_config.mall, "payment_mode", "mock")
+    monkeypatch.setattr(
+        compliance_config, "legal_entity_credit_code", "91330100123456789X"
+    )
+    monkeypatch.setattr(
+        compliance_config, "merchant_agreement_version", "2026-09-03"
+    )
+    monkeypatch.setattr(compliance_config, "legal_documents_approved", True)
     # 同理，手机号流程测试只验证本地验证码逻辑，不发送真实短信。
     monkeypatch.setattr(sms, "is_tencent_sms_configured", lambda: False)
     client = SyncASGITestClient(app)

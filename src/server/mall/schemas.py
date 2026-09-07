@@ -88,8 +88,11 @@ class ShopAgreementSummaryOut(BaseModel):
     document_version: str
     draft_content_sha256: str
     status: ShopAgreementStatus
+    signature_mode: Literal["online_click", "uploaded_document"]
     generated_at: datetime
     merchant_signed_asset_id: str | None
+    merchant_signed_by_user_id: int | None
+    merchant_signed_account: str | None = None
     merchant_signed_at: datetime | None
     platform_signed_asset_id: str | None
     platform_signed_at: datetime | None
@@ -109,6 +112,13 @@ class MerchantAgreementSignIn(BaseModel):
     document_version: str = Field(..., min_length=1, max_length=32)
     merchant_signed_asset_id: str = Field(..., min_length=32, max_length=32)
     confirmed: bool
+
+
+class MerchantAgreementAcceptIn(BaseModel):
+    agreement_number: str = Field(..., min_length=1, max_length=64)
+    document_version: str = Field(..., min_length=1, max_length=32)
+    draft_content_sha256: str = Field(..., min_length=64, max_length=64)
+    confirmed: Literal[True]
 
 
 class PlatformAgreementSignIn(BaseModel):

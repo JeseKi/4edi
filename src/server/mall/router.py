@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse, RedirectResponse
 from sqlalchemy.orm import Session
 
 from src.server.auth.dependencies.admin import get_current_admin
+from src.server.auth.models import User
 from src.server.auth.dependencies.current_user import (
     AuthenticatedPrincipal,
     get_current_principal,
@@ -89,6 +90,7 @@ from .schemas import (
     RefundOut,
     RefundRejectIn,
     ReturnTrackingIn,
+    MerchantAgreementAcceptIn,
     MerchantAgreementSignIn,
     PlatformAgreementSignIn,
     ShopApply,
@@ -126,6 +128,16 @@ def _page_params(
     page_size: int = Query(20, ge=1, le=100),
 ) -> tuple[int, int]:
     return page, page_size
+
+
+def _agreement_out(db: Session, agreement) -> ShopAgreementOut:
+    account = None
+    if agreement.merchant_signed_by_user_id is not None:
+        signer = db.get(User, agreement.merchant_signed_by_user_id)
+        account = signer.username if signer is not None else None
+    return ShopAgreementOut.model_validate(agreement).model_copy(
+        update={"merchant_signed_account": account}
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1319,10 +1331,46 @@ async def get_my_shop_agreement(
     database_executor: DatabaseExecutor = Depends(get_database_executor),
 ):
     return await database_executor.run(
-        lambda db: ShopAgreementOut.model_validate(
-            service.get_my_shop_agreement(db, current_user)
+        lambda db: _agreement_out(
+            db, service.get_my_shop_agreement(db, current_user)
         )
     )
+
+
+@seller_router.post(
+    "/shop/agreement/accept",
+    summary="商家在线签署电子协议",
+    response_model=ShopOut,
+)
+async def merchant_accept_shop_agreement(
+    request: Request,
+    payload: MerchantAgreementAcceptIn,
+    current_user: AuthenticatedPrincipal = Depends(_require_login),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    def _accept(db):
+        shop = service.merchant_accept_shop_agreement(
+            db,
+            current_user,
+            payload.model_dump(),
+            client_ip=request.client.host if request.client else None,
+            user_agent=request.headers.get("user-agent"),
+        )
+        from src.server.audit import service as audit_service
+
+        audit_service.attach_audit_context(
+            request.state,
+            priority="high",
+            action="mall.shop.agreement.accept",
+            resource_type="shop_agreement",
+            resource_id=shop.current_agreement_id,
+            target_summary=shop.current_agreement.agreement_number
+            if shop.current_agreement
+            else shop.name,
+        )
+        return ShopOut.model_validate(shop)
+
+    return await database_executor.run(_accept)
 
 
 @seller_router.get(
@@ -2045,6 +2093,21 @@ async def admin_shop_detail(
     return await database_executor.run(_detail)
 
 
+@admin_router.get(
+    "/shops/{shop_id}/agreement",
+    summary="查看商家完整入驻协议",
+    response_model=ShopAgreementOut,
+)
+async def admin_get_shop_agreement(
+    shop_id: int,
+    _: AuthenticatedPrincipal = Security(get_current_admin),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    return await database_executor.run(
+        lambda db: _agreement_out(db, service.admin_get_shop_agreement(db, shop_id))
+    )
+
+
 @admin_router.post("/shops/{shop_id}/review", summary="店铺资质预审", response_model=ShopOut)
 async def admin_review_shop(
     request: Request,
@@ -2099,7 +2162,7 @@ async def admin_generate_shop_agreement(
             resource_id=agreement.id,
             target_summary=agreement.agreement_number,
         )
-        return ShopAgreementOut.model_validate(agreement)
+        return _agreement_out(db, agreement)
 
     return await database_executor.run(_generate)
 

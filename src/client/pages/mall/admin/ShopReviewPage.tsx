@@ -33,6 +33,18 @@ const STAGE_LABELS: Record<ShopOnboardingStage, { text: string; color: string }>
   rejected: { text: '资质已驳回', color: 'red' },
 }
 
+function stageLabel(shop: MallShop): { text: string; color: string } {
+  if (shop.current_agreement?.signature_mode === 'online_click') {
+    if (shop.onboarding_stage === 'agreement_generated') {
+      return { text: '等待商家在线签约', color: 'cyan' }
+    }
+    if (shop.onboarding_stage === 'agreement_archived') {
+      return { text: '商家已在线签约', color: 'magenta' }
+    }
+  }
+  return STAGE_LABELS[shop.onboarding_stage]
+}
+
 const TABS = [
   { key: 'pending', label: '入驻处理中' },
   { key: 'approved', label: '已通过' },
@@ -118,7 +130,7 @@ export default function ShopReviewPage() {
         business_scope_matches: Boolean(values.business_scope_matches),
         note: values.note,
       })
-      message.success(reviewApproved ? '企业资质预审已通过' : '店铺资质已驳回')
+      message.success(reviewApproved ? '企业资质预审已通过，电子协议已自动生成' : '店铺资质已驳回')
       setReviewTarget(null)
       setEvidenceUploaded(false)
       form.resetFields()
@@ -259,7 +271,7 @@ export default function ShopReviewPage() {
       dataIndex: 'onboarding_stage',
       key: 'status',
       render: (stage: ShopOnboardingStage, record: MallShop) => {
-        const label = record.status === 'closed' ? STATUS_LABELS.closed : STAGE_LABELS[stage]
+        const label = record.status === 'closed' ? STATUS_LABELS.closed : stageLabel(record)
         return <Tag color={label?.color}>{label?.text ?? stage}</Tag>
       },
     },
@@ -279,30 +291,49 @@ export default function ShopReviewPage() {
             </>
           )}
           {record.status === 'pending' && record.onboarding_stage === 'qualification_preapproved' && (
-            <Popconfirm title="将按当前商家资料生成不可变的协议定稿，确定？" onConfirm={() => void generateAgreement(record)}>
-              <Button size="small" type="primary" loading={submitting}>生成协议</Button>
+            <Popconfirm title="这是升级前遗留记录，将按当前商家资料生成电子协议，确定？" onConfirm={() => void generateAgreement(record)}>
+              <Button size="small" type="primary" loading={submitting}>生成电子协议</Button>
             </Popconfirm>
           )}
-          {record.status === 'pending' && record.onboarding_stage === 'agreement_generated' && <span className="text-xs text-gray-500">等待商家签署</span>}
-          {record.status === 'pending' && record.onboarding_stage === 'merchant_signed' && (
+          {record.status === 'pending' && record.onboarding_stage === 'agreement_generated' && (
+            <Space size="small" wrap>
+              <span className="text-xs text-gray-500">
+                {record.current_agreement?.signature_mode === 'online_click' ? '等待商家在线签约' : '等待商家上传签署文件'}
+              </span>
+              <Button size="small" href={`/mall/admin/shops/${record.id}/agreement/print`} target="_blank">
+                {record.current_agreement?.signature_mode === 'online_click' ? '查看电子协议' : '查看协议正文'}
+              </Button>
+            </Space>
+          )}
+          {record.status === 'pending' && record.onboarding_stage === 'merchant_signed' && record.current_agreement?.signature_mode === 'uploaded_document' && (
             <Button size="small" type="primary" onClick={() => setPlatformSignTarget(record)}>提交平台签署</Button>
           )}
-          {record.status === 'pending' && record.onboarding_stage === 'platform_signed' && (
+          {record.status === 'pending' && record.onboarding_stage === 'platform_signed' && record.current_agreement?.signature_mode === 'uploaded_document' && (
             <Popconfirm title="确认将平台签署文件作为双方最终协议归档？" onConfirm={() => void archiveAgreement(record)}>
               <Button size="small" type="primary" loading={submitting}>归档最终协议</Button>
             </Popconfirm>
           )}
           {record.status === 'pending' && record.onboarding_stage === 'agreement_archived' && (
-            <Popconfirm title="确认资质和最终协议均完整，批准商家入驻？" onConfirm={() => void approveShop(record)}>
-              <Button size="small" type="primary" loading={submitting}>商家审核通过</Button>
-            </Popconfirm>
+            <>
+              {record.current_agreement?.signature_mode === 'online_click' && (
+                <Button size="small" href={`/mall/admin/shops/${record.id}/agreement/print`} target="_blank">查看电子协议</Button>
+              )}
+              <Popconfirm title="确认资质和签约记录均完整，批准商家入驻？" onConfirm={() => void approveShop(record)}>
+                <Button size="small" type="primary" loading={submitting}>最终审核通过</Button>
+              </Popconfirm>
+            </>
           )}
           {record.status === 'approved' && (
-            <Popconfirm title="关闭店铺后其商品将全部下架，确定？" onConfirm={() => closeShop(record)}>
-              <Button size="small" danger>
-                关闭店铺
-              </Button>
-            </Popconfirm>
+            <>
+              {record.current_agreement?.signature_mode === 'online_click' && (
+                <Button size="small" href={`/mall/admin/shops/${record.id}/agreement/print`} target="_blank">查看电子协议</Button>
+              )}
+              <Popconfirm title="关闭店铺后其商品将全部下架，确定？" onConfirm={() => closeShop(record)}>
+                <Button size="small" danger>
+                  关闭店铺
+                </Button>
+              </Popconfirm>
+            </>
           )}
           {record.status === 'closed' && (
             <Popconfirm title="开启店铺后，商品仍保持下架，确定？" onConfirm={() => reopenShop(record)}>
@@ -349,7 +380,7 @@ export default function ShopReviewPage() {
               <Descriptions.Item label="注册地址">{record.registered_address || '-'}</Descriptions.Item>
               <Descriptions.Item label="实际经营地址">{record.business_address || '-'}</Descriptions.Item>
               <Descriptions.Item label="营业执照有效期">{record.business_license_long_term ? '长期有效' : record.business_license_valid_until || '-'}</Descriptions.Item>
-              <Descriptions.Item label="入驻阶段"><Tag color={STAGE_LABELS[record.onboarding_stage].color}>{STAGE_LABELS[record.onboarding_stage].text}</Tag></Descriptions.Item>
+              <Descriptions.Item label="入驻阶段"><Tag color={stageLabel(record).color}>{stageLabel(record).text}</Tag></Descriptions.Item>
               <Descriptions.Item label="审核材料">
                 <div className="flex flex-wrap gap-2">
                   <Button size="small" disabled={!record.business_license_asset_id} onClick={() => void previewDocument('营业执照', record.business_license_asset_id)}>
@@ -365,16 +396,26 @@ export default function ShopReviewPage() {
               </Descriptions.Item>
               {record.current_agreement && (
                 <Descriptions.Item label="入驻协议">
-                  <div className="space-y-2">
-                    <div>编号：{record.current_agreement.agreement_number}；版本：{record.current_agreement.document_version}</div>
-                    <div style={{ wordBreak: 'break-all' }}>协议定稿内部校验值：{record.current_agreement.draft_content_sha256}</div>
-                    <div style={{ wordBreak: 'break-all' }}>最终归档文件校验值：{record.current_agreement.final_file_sha256 || '归档后生成'}</div>
-                    <div className="flex flex-wrap gap-2">
-                      <Button size="small" disabled={!record.current_agreement.merchant_signed_asset_id} onClick={() => void previewDocument('商家签署协议', record.current_agreement?.merchant_signed_asset_id || null)}>商家签署文件</Button>
-                      <Button size="small" disabled={!record.current_agreement.platform_signed_asset_id} onClick={() => void previewDocument('平台签署协议', record.current_agreement?.platform_signed_asset_id || null)}>平台签署文件</Button>
-                      <Button size="small" disabled={!record.current_agreement.final_asset_id} onClick={() => void previewDocument('最终归档协议', record.current_agreement?.final_asset_id || null)}>最终归档文件</Button>
+                  {record.current_agreement.signature_mode === 'online_click' ? (
+                    <div className="space-y-2">
+                      <div>编号：{record.current_agreement.agreement_number}；版本：{record.current_agreement.document_version}</div>
+                      <div>签约方式：商家在线确认</div>
+                      <div>签约账号：{record.current_agreement.merchant_signed_by_user_id ? `用户 #${record.current_agreement.merchant_signed_by_user_id}` : '等待商家签约'}</div>
+                      <div>签约时间：{record.current_agreement.merchant_signed_at || '等待商家签约'}</div>
+                      <Button size="small" href={`/mall/admin/shops/${record.id}/agreement/print`} target="_blank">查看电子协议</Button>
                     </div>
-                  </div>
+                  ) : (
+                    <div className="space-y-2">
+                      <div>历史文件协议；编号：{record.current_agreement.agreement_number}；版本：{record.current_agreement.document_version}</div>
+                      <div style={{ wordBreak: 'break-all' }}>协议定稿内部校验值：{record.current_agreement.draft_content_sha256}</div>
+                      <div style={{ wordBreak: 'break-all' }}>最终归档文件校验值：{record.current_agreement.final_file_sha256 || '归档后生成'}</div>
+                      <div className="flex flex-wrap gap-2">
+                        <Button size="small" disabled={!record.current_agreement.merchant_signed_asset_id} onClick={() => void previewDocument('商家签署协议', record.current_agreement?.merchant_signed_asset_id || null)}>商家签署文件</Button>
+                        <Button size="small" disabled={!record.current_agreement.platform_signed_asset_id} onClick={() => void previewDocument('平台签署协议', record.current_agreement?.platform_signed_asset_id || null)}>平台签署文件</Button>
+                        <Button size="small" disabled={!record.current_agreement.final_asset_id} onClick={() => void previewDocument('最终归档协议', record.current_agreement?.final_asset_id || null)}>最终归档文件</Button>
+                      </div>
+                    </div>
+                  )}
                 </Descriptions.Item>
               )}
               <Descriptions.Item label="驳回原因">{record.reject_reason || '-'}</Descriptions.Item>

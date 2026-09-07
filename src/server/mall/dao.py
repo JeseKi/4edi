@@ -160,6 +160,14 @@ class ShopDAO(BaseDAO):
             .first()
         )
 
+    def lock_by_owner(self, owner_user_id: int) -> Shop | None:
+        return (
+            self.db_session.query(Shop)
+            .filter(Shop.owner_user_id == owner_user_id)
+            .with_for_update()
+            .first()
+        )
+
     def list(
         self,
         *,

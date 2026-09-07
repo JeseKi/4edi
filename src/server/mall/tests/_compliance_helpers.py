@@ -88,78 +88,44 @@ def complete_shop_onboarding(
     admin_headers: dict[str, str],
     shop_id: int,
 ) -> dict:
-    """按生产约束完成七阶段入驻，并返回最终店铺响应。"""
+    """按生产约束完成在线签约入驻，并返回最终店铺响应。"""
     reviewed = test_client.post(
         f"/api/mall/admin/shops/{shop_id}/review",
         json=shop_review_payload(test_client, admin_headers, approved=True),
         headers=admin_headers,
     )
     assert reviewed.status_code == 200, reviewed.text
-    assert reviewed.json()["onboarding_stage"] == "qualification_preapproved"
+    assert reviewed.json()["onboarding_stage"] == "agreement_generated"
+    assert reviewed.json()["current_agreement"]["signature_mode"] == "online_click"
 
-    generated = test_client.post(
-        f"/api/mall/admin/shops/{shop_id}/agreement/generate",
-        headers=admin_headers,
+    generated = test_client.get(
+        "/api/mall/seller/shop/agreement", headers=seller_headers
     )
     assert generated.status_code == 200, generated.text
     agreement = generated.json()
     assert "内容 SHA-256" not in agreement["content_markdown"]
-    assert "不得擅自增删或修改协议内容" in agreement["content_markdown"]
+    assert "确认签署电子协议" in agreement["content_markdown"]
     assert len(agreement["draft_content_sha256"]) == 64
+    assert agreement["signature_mode"] == "online_click"
 
-    merchant_signed_asset_id = upload_compliance_asset(
-        test_client, seller_headers, "merchant-signed-agreement.png"
-    )
-    merchant_signed = test_client.post(
-        "/api/mall/seller/shop/agreement/merchant-sign",
+    accepted = test_client.post(
+        "/api/mall/seller/shop/agreement/accept",
         json={
             "agreement_number": agreement["agreement_number"],
             "document_version": agreement["document_version"],
-            "merchant_signed_asset_id": merchant_signed_asset_id,
+            "draft_content_sha256": agreement["draft_content_sha256"],
             "confirmed": True,
         },
         headers=seller_headers,
     )
-    assert merchant_signed.status_code == 200, merchant_signed.text
-    assert merchant_signed.json()["onboarding_stage"] == "merchant_signed"
-
-    signed_file = test_client.get(
-        "/api/mall/seller/shop/agreement/signed-file",
-        headers=seller_headers,
-    )
-    assert signed_file.status_code == 409, signed_file.text
-
-    platform_signed_asset_id = upload_compliance_asset(
-        test_client, admin_headers, "platform-signed-agreement.png"
-    )
-    platform_signed = test_client.post(
-        f"/api/mall/admin/shops/{shop_id}/agreement/platform-sign",
-        json={
-            "platform_signed_asset_id": platform_signed_asset_id,
-            "agreement_matches": True,
-        },
-        headers=admin_headers,
-    )
-    assert platform_signed.status_code == 200, platform_signed.text
-    assert platform_signed.json()["onboarding_stage"] == "platform_signed"
-
-    signed_file = test_client.get(
-        "/api/mall/seller/shop/agreement/signed-file",
-        headers=seller_headers,
-    )
-    assert signed_file.status_code == 200, signed_file.text
-    assert signed_file.content == b"test-compliance-material"
-    assert "attachment" in signed_file.headers["content-disposition"]
-
-    archived = test_client.post(
-        f"/api/mall/admin/shops/{shop_id}/agreement/archive",
-        headers=admin_headers,
-    )
-    assert archived.status_code == 200, archived.text
-    assert archived.json()["onboarding_stage"] == "agreement_archived"
-    assert archived.json()["current_agreement"]["final_file_sha256"] == hashlib.sha256(
-        b"test-compliance-material"
-    ).hexdigest()
+    assert accepted.status_code == 200, accepted.text
+    assert accepted.json()["onboarding_stage"] == "agreement_archived"
+    current = accepted.json()["current_agreement"]
+    assert current["merchant_signed_asset_id"] is None
+    assert current["platform_signed_asset_id"] is None
+    assert current["final_asset_id"] is None
+    assert current["merchant_signed_by_user_id"] is not None
+    assert current["merchant_signed_at"] is not None
 
     approved = test_client.post(
         f"/api/mall/admin/shops/{shop_id}/approve",

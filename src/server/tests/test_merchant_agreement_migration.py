@@ -103,14 +103,18 @@ def test_agreement_hash_migration_preserves_existing_digest(tmp_path: Path) -> N
         assert "content_sha256" not in columns
         assert "draft_content_sha256" in columns
         assert "final_file_sha256" in columns
+        assert "signature_mode" in columns
+        assert "acceptance_ip" in columns
+        assert "acceptance_user_agent" in columns
         row = connection.execute(
             """
-            SELECT draft_content_sha256, final_file_sha256
+            SELECT draft_content_sha256, final_file_sha256, signature_mode,
+                   acceptance_ip, acceptance_user_agent
             FROM shop_agreements
             WHERE agreement_number = 'M-MIGRATION-TEST'
             """
         ).fetchone()
-        assert row == ("a" * 64, None)
+        assert row == ("a" * 64, None, "uploaded_document", None, None)
         shop = connection.execute(
             "SELECT current_agreement_id FROM mall_shops WHERE id = 999"
         ).fetchone()

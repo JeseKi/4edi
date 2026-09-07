@@ -531,8 +531,11 @@ export interface ShopAgreementSummary {
   document_version: string
   draft_content_sha256: string
   status: ShopAgreementStatus
+  signature_mode: 'online_click' | 'uploaded_document'
   generated_at: string
   merchant_signed_asset_id: string | null
+  merchant_signed_by_user_id: number | null
+  merchant_signed_account: string | null
   merchant_signed_at: string | null
   platform_signed_asset_id: string | null
   platform_signed_at: string | null

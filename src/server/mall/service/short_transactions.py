@@ -482,6 +482,20 @@ def admin_review_shop(
         shop.last_qualification_review_id = review.id
         shop.last_qualification_checked_at = checked_at
         shop.registration_status = review.registration_status
+        shop.qualification_valid_until = _qualification_review_valid_until(
+            shop, review
+        )
+        if _as_utc(shop.qualification_valid_until) <= checked_at:
+            raise HTTPException(
+                status_code=409,
+                detail="企业资质已过期，请更新材料后重新提交",
+            )
+        _generate_shop_agreement(
+            db,
+            shop,
+            handler_user_id=handler_user_id,
+            signature_mode="online_click",
+        )
     else:
         shop.status = ShopStatus.REJECTED
         shop.onboarding_stage = ShopOnboardingStage.REJECTED.value
@@ -513,12 +527,20 @@ def get_my_shop_agreement(
     return _current_shop_agreement(db, shop)
 
 
+def admin_get_shop_agreement(db: Session, shop_id: int) -> ShopAgreement:
+    shop = ShopDAO(db).get(shop_id)
+    if shop is None:
+        raise HTTPException(status_code=404, detail="店铺不存在")
+    return _current_shop_agreement(db, shop)
+
+
 def get_my_shop_signed_agreement_snapshot(
     db: Session, principal: AuthenticatedPrincipal
 ) -> file_transactions.FileAssetSnapshot:
     """返回当前商家有权读取的双方签署协议文件。"""
     shop = get_my_shop(db, principal)
     agreement = _current_shop_agreement(db, shop)
+    _assert_uploaded_document_agreement(agreement)
     if shop.onboarding_stage not in {
         ShopOnboardingStage.PLATFORM_SIGNED.value,
         ShopOnboardingStage.AGREEMENT_ARCHIVED.value,
@@ -542,7 +564,25 @@ def admin_generate_shop_agreement(
         != ShopOnboardingStage.QUALIFICATION_PREAPPROVED.value
     ):
         raise HTTPException(status_code=409, detail="资质预审通过后才能生成协议")
-    snapshot = build_agreement_snapshot(shop)
+    return _generate_shop_agreement(
+        db,
+        shop,
+        handler_user_id=handler_user_id,
+        signature_mode="online_click",
+    )
+
+
+def _generate_shop_agreement(
+    db: Session,
+    shop: Shop,
+    *,
+    handler_user_id: int,
+    signature_mode: str,
+) -> ShopAgreement:
+    try:
+        snapshot = build_agreement_snapshot(shop)
+    except (KeyError, ValueError) as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     agreement = ShopAgreement(
         shop_id=shop.id,
         agreement_number=snapshot.agreement_number,
@@ -550,6 +590,7 @@ def admin_generate_shop_agreement(
         content_markdown=snapshot.content_markdown,
         draft_content_sha256=snapshot.draft_content_sha256,
         status=ShopAgreementStatus.GENERATED.value,
+        signature_mode=signature_mode,
         generated_by_user_id=handler_user_id,
         generated_at=_utcnow(),
     )
@@ -560,6 +601,97 @@ def admin_generate_shop_agreement(
     shop.merchant_agreement_version = agreement.document_version
     shop.onboarding_stage = ShopOnboardingStage.AGREEMENT_GENERATED.value
     return agreement
+
+
+def _assert_uploaded_document_agreement(agreement: ShopAgreement) -> None:
+    if agreement.signature_mode != "uploaded_document":
+        raise HTTPException(status_code=409, detail="在线签约协议不使用文件签署流程")
+
+
+def _qualification_review_valid_until(
+    shop: Shop, review: ShopQualificationReview
+) -> datetime:
+    valid_until = _add_months(
+        _as_utc(review.checked_at), compliance_config.qualification_valid_months
+    )
+    if not shop.business_license_long_term and shop.business_license_valid_until:
+        license_deadline = datetime.combine(
+            shop.business_license_valid_until, time.max, tzinfo=timezone.utc
+        )
+        valid_until = min(valid_until, license_deadline)
+    return valid_until
+
+
+def _assert_current_qualification_preapproval(
+    db: Session, shop: Shop, *, now: datetime
+) -> None:
+    if shop.last_qualification_review_id is None:
+        raise HTTPException(status_code=409, detail="缺少资质预审记录")
+    review = db.get(ShopQualificationReview, shop.last_qualification_review_id)
+    if review is None or review.result != "preapproved":
+        raise HTTPException(status_code=409, detail="资质预审记录无效")
+    valid_until = _qualification_review_valid_until(shop, review)
+    if valid_until <= now:
+        raise HTTPException(status_code=409, detail="企业资质预审已过期，请重新提交核验")
+    shop.qualification_valid_until = valid_until
+
+
+def merchant_accept_shop_agreement(
+    db: Session,
+    principal: AuthenticatedPrincipal,
+    payload: dict,
+    *,
+    client_ip: str | None,
+    user_agent: str | None,
+) -> Shop:
+    shop = ShopDAO(db).lock_by_owner(principal.user_id)
+    if shop is None:
+        raise HTTPException(status_code=404, detail="尚未申请店铺")
+    agreement = _current_shop_agreement(db, shop)
+    if agreement.signature_mode != "online_click":
+        raise HTTPException(status_code=409, detail="当前协议使用历史文件签署流程")
+    if (
+        payload["agreement_number"] != agreement.agreement_number
+        or payload["document_version"] != agreement.document_version
+        or payload["draft_content_sha256"] != agreement.draft_content_sha256
+    ):
+        raise HTTPException(status_code=422, detail="协议编号、版本或正文校验不匹配")
+    if agreement.document_version != compliance_config.merchant_agreement_version:
+        raise HTTPException(status_code=422, detail="协议版本已更新，请重新完成入驻流程")
+
+    if (
+        agreement.status == ShopAgreementStatus.ARCHIVED.value
+        and agreement.merchant_signed_by_user_id == principal.user_id
+        and shop.onboarding_stage
+        in {
+            ShopOnboardingStage.AGREEMENT_ARCHIVED.value,
+            ShopOnboardingStage.APPROVED.value,
+        }
+    ):
+        return shop
+    if shop.onboarding_stage != ShopOnboardingStage.AGREEMENT_GENERATED.value:
+        raise HTTPException(status_code=409, detail="当前阶段不能签署电子协议")
+
+    accepted_at = _utcnow()
+    _assert_current_qualification_preapproval(db, shop, now=accepted_at)
+    auth_transactions.record_document_acceptance(
+        db,
+        user_id=principal.user_id,
+        document_type="merchant_agreement",
+        document_version=agreement.document_version,
+        client_ip=client_ip,
+        user_agent=user_agent,
+    )
+    agreement.merchant_signed_by_user_id = principal.user_id
+    agreement.merchant_signed_at = accepted_at
+    agreement.acceptance_ip = (client_ip or "")[:80] or None
+    agreement.acceptance_user_agent = (user_agent or "")[:500] or None
+    agreement.status = ShopAgreementStatus.ARCHIVED.value
+    agreement.archived_by_user_id = principal.user_id
+    agreement.archived_at = accepted_at
+    shop.agreement_accepted_at = accepted_at
+    shop.onboarding_stage = ShopOnboardingStage.AGREEMENT_ARCHIVED.value
+    return shop
 
 
 def merchant_sign_shop_agreement(
@@ -576,6 +708,7 @@ def merchant_sign_shop_agreement(
     if shop.onboarding_stage != ShopOnboardingStage.AGREEMENT_GENERATED.value:
         raise HTTPException(status_code=409, detail="当前阶段不能提交商家签署协议")
     agreement = _current_shop_agreement(db, shop)
+    _assert_uploaded_document_agreement(agreement)
     if not payload.get("confirmed"):
         raise HTTPException(status_code=422, detail="请确认上传的是当前协议定稿")
     if (
@@ -629,6 +762,7 @@ def admin_platform_sign_shop_agreement(
     if not payload.get("agreement_matches"):
         raise HTTPException(status_code=422, detail="必须确认协议编号、版本和双方主体一致")
     agreement = _current_shop_agreement(db, shop)
+    _assert_uploaded_document_agreement(agreement)
     asset_id = payload["platform_signed_asset_id"]
     if asset_id == agreement.merchant_signed_asset_id:
         raise HTTPException(status_code=422, detail="平台签署后应上传新的双方签署文件")
@@ -663,6 +797,7 @@ def prepare_shop_agreement_archive(
     if shop.onboarding_stage != ShopOnboardingStage.PLATFORM_SIGNED.value:
         raise HTTPException(status_code=409, detail="平台签署完成后才能归档")
     agreement = _current_shop_agreement(db, shop)
+    _assert_uploaded_document_agreement(agreement)
     if agreement.platform_signed_asset_id is None:
         raise HTTPException(status_code=409, detail="缺少双方签署的最终协议")
     return file_transactions.get_available_asset_snapshot(
@@ -684,6 +819,7 @@ def admin_archive_shop_agreement(
     if shop.onboarding_stage != ShopOnboardingStage.PLATFORM_SIGNED.value:
         raise HTTPException(status_code=409, detail="平台签署完成后才能归档")
     agreement = _current_shop_agreement(db, shop)
+    _assert_uploaded_document_agreement(agreement)
     if agreement.platform_signed_asset_id is None:
         raise HTTPException(status_code=409, detail="缺少双方签署的最终协议")
     if agreement.platform_signed_asset_id != expected_asset_id:
@@ -713,22 +849,10 @@ def admin_approve_shop(db: Session, shop_id: int) -> Shop:
         raise HTTPException(status_code=404, detail="店铺不存在")
     if shop.onboarding_stage != ShopOnboardingStage.AGREEMENT_ARCHIVED.value:
         raise HTTPException(status_code=409, detail="最终协议归档后才能批准商家")
-    if shop.last_qualification_review_id is None:
-        raise HTTPException(status_code=409, detail="缺少资质预审记录")
-    review = db.get(ShopQualificationReview, shop.last_qualification_review_id)
-    if review is None or review.result != "preapproved":
-        raise HTTPException(status_code=409, detail="资质预审记录无效")
-    valid_until = _add_months(
-        _as_utc(review.checked_at), compliance_config.qualification_valid_months
-    )
-    if not shop.business_license_long_term and shop.business_license_valid_until:
-        license_deadline = datetime.combine(
-            shop.business_license_valid_until, time.max, tzinfo=timezone.utc
-        )
-        valid_until = min(valid_until, license_deadline)
-    if valid_until <= _utcnow():
-        raise HTTPException(status_code=409, detail="企业资质预审已过期，请重新提交核验")
     approved_at = _utcnow()
+    _assert_current_qualification_preapproval(db, shop, now=approved_at)
+    valid_until = shop.qualification_valid_until
+    assert valid_until is not None
     shop.status = ShopStatus.APPROVED
     shop.onboarding_stage = ShopOnboardingStage.APPROVED.value
     shop.approved_at = approved_at

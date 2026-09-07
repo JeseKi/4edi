@@ -82,6 +82,14 @@ export const submitMerchantSignedAgreement = async (payload: {
 }): Promise<MallShop> =>
   (await api.post<MallShop>('/mall/seller/shop/agreement/merchant-sign', payload)).data
 
+export const acceptMerchantAgreement = async (payload: {
+  agreement_number: string
+  document_version: string
+  draft_content_sha256: string
+  confirmed: true
+}): Promise<MallShop> =>
+  (await api.post<MallShop>('/mall/seller/shop/agreement/accept', payload)).data
+
 export const updateMallShop = async (payload: {
   name?: string
   description?: string
@@ -328,6 +336,9 @@ export const reviewAdminShop = async (
 
 export const generateAdminShopAgreement = async (shopId: number): Promise<ShopAgreement> =>
   (await api.post<ShopAgreement>(`/mall/admin/shops/${shopId}/agreement/generate`)).data
+
+export const getAdminShopAgreement = async (shopId: number): Promise<ShopAgreement> =>
+  (await api.get<ShopAgreement>(`/mall/admin/shops/${shopId}/agreement`)).data
 
 export const submitAdminPlatformSignedAgreement = async (
   shopId: number,

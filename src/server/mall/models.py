@@ -319,6 +319,9 @@ class ShopAgreement(Base):
     status: Mapped[str] = mapped_column(
         String(32), nullable=False, default=ShopAgreementStatus.GENERATED.value
     )
+    signature_mode: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="online_click"
+    )
     generated_by_user_id: Mapped[int] = mapped_column(
         ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
     )
@@ -333,6 +336,10 @@ class ShopAgreement(Base):
     )
     merchant_signed_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True), default=None
+    )
+    acceptance_ip: Mapped[Optional[str]] = mapped_column(String(80), default=None)
+    acceptance_user_agent: Mapped[Optional[str]] = mapped_column(
+        String(500), default=None
     )
     platform_signed_asset_id: Mapped[Optional[str]] = mapped_column(
         ForeignKey("file_assets.id", ondelete="RESTRICT"), default=None

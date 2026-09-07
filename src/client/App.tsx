@@ -158,6 +158,9 @@ function AppRoutes() {
           <Route path="/mall/admin/shops" element={<RequireAdmin><ShopReviewPage /></RequireAdmin>} />
         )}
         {hasFeature('mall') && (
+          <Route path="/mall/admin/shops/:shopId/agreement/print" element={<RequireAdmin><ShopAgreementPrintPage /></RequireAdmin>} />
+        )}
+        {hasFeature('mall') && (
           <Route path="/mall/admin/withdrawals" element={<RequireAdmin><WithdrawReviewPage /></RequireAdmin>} />
         )}
         {hasFeature('mall') && (
