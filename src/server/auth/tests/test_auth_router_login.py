@@ -93,7 +93,7 @@ def test_legal_documents_are_public_and_versioned(test_client):
     assert versions == {
         "user_agreement": "2026-09-02",
         "privacy_policy": "2026-09-02",
-        "merchant_agreement": "2026-09-03",
+        "merchant_agreement": "2026-09-07",
     }
     assert all("演示项目" not in item["content_markdown"] for item in documents)
     assert all("{{service_phone}}" not in item["content_markdown"] for item in documents)

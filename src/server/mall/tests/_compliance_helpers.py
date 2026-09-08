@@ -51,6 +51,7 @@ def shop_application_payload(
         "contact_phone": "13800138000",
         "business_license_valid_until": (date.today() + timedelta(days=365)).isoformat(),
         "business_license_long_term": False,
+        "special_license_not_required": True,
         "business_license_asset_id": upload_compliance_asset(
             test_client, headers, "business-license.png"
         ),
@@ -78,6 +79,7 @@ def shop_review_payload(test_client, headers: dict[str, str], *, approved: bool)
         "registration_status_valid": approved,
         "registered_address_matches": approved,
         "business_scope_matches": approved,
+        "special_license_scope_allowed": approved,
         "note": "自动化测试核验记录",
     }
 

@@ -232,6 +232,9 @@ class Shop(Base):
     contact_phone: Mapped[Optional[str]] = mapped_column(String(32), default=None)
     business_license_valid_until: Mapped[Optional[date]] = mapped_column(default=None)
     business_license_long_term: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    special_license_not_required: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     merchant_agreement_version: Mapped[Optional[str]] = mapped_column(String(32), default=None)
     merchant_agreement_asset_id: Mapped[Optional[str]] = mapped_column(String(32), default=None)
     agreement_accepted_at: Mapped[Optional[datetime]] = mapped_column(
@@ -401,6 +404,9 @@ class Category(Base):
     level: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     sort: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     icon: Mapped[Optional[str]] = mapped_column(String(500), default=None)
+    requires_special_license: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )

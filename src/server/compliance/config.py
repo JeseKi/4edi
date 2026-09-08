@@ -16,7 +16,7 @@ class ComplianceConfig(BaseModel):
     icp_record_number: str = Field(default="浙ICP备2026035190号-1")
     user_agreement_version: str = Field(default="2026-09-02")
     privacy_policy_version: str = Field(default="2026-09-02")
-    merchant_agreement_version: str = Field(default="2026-09-03")
+    merchant_agreement_version: str = Field(default="2026-09-07")
     legal_documents_approved: bool = Field(default=False)
     sensitive_data_encryption_key: str = Field(
         default="dev-compliance-key-change-me",

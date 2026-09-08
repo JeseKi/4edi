@@ -199,6 +199,7 @@ def _write_shop_application(
         "contact_phone",
         "business_license_valid_until",
         "business_license_long_term",
+        "special_license_not_required",
     ):
         setattr(shop, field, payload.get(field))
     shop.identity_number_encrypted = encrypt_sensitive_value(identity_number)
@@ -446,9 +447,15 @@ def admin_review_shop(
             "registration_status_valid",
             "registered_address_matches",
             "business_scope_matches",
+            "special_license_scope_allowed",
         )
     }
     approved = bool(payload["approved"])
+    if approved and not shop.special_license_not_required:
+        raise HTTPException(
+            status_code=422,
+            detail="商家尚未确认首期经营范围不涉及专项许可行业",
+        )
     if approved and not all(checklist.values()):
         raise HTTPException(status_code=422, detail="全部企业核验项目一致后才能通过预审")
     reject_reason = (payload.get("reject_reason") or "").strip()
@@ -910,14 +917,26 @@ def admin_reopen_shop(db: Session, shop_id: int) -> Shop:
 
 
 def list_categories(db: Session) -> list[Category]:
-    return CategoryDAO(db).list_all()
+    return CategoryDAO(db).list_open()
 
 
 def create_category(
-    db: Session, *, name: str, parent_id: int | None, sort: int, icon: str | None
+    db: Session,
+    *,
+    name: str,
+    parent_id: int | None,
+    sort: int,
+    icon: str | None,
+    requires_special_license: bool,
 ) -> Category:
     try:
-        return CategoryDAO(db).create(name=name, parent_id=parent_id, sort=sort, icon=icon)
+        return CategoryDAO(db).create(
+            name=name,
+            parent_id=parent_id,
+            sort=sort,
+            icon=icon,
+            requires_special_license=requires_special_license,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc))
 
@@ -979,11 +998,29 @@ def _apply_skus(db: Session, goods: Goods, skus_data: list[dict]) -> None:
     goods.stock = total_stock
 
 
+def _assert_category_open(db: Session, category_id: int | None) -> None:
+    if category_id is None:
+        return
+    dao = CategoryDAO(db)
+    category = dao.get(category_id)
+    if category is None:
+        raise HTTPException(status_code=422, detail="商品分类不存在")
+    current: Category | None = category
+    while current is not None:
+        if current.requires_special_license:
+            raise HTTPException(
+                status_code=422,
+                detail="该类目属于需要专项许可的行业，首期暂不开放",
+            )
+        current = dao.get(current.parent_id) if current.parent_id is not None else None
+
+
 def create_goods(
     db: Session, principal: AuthenticatedPrincipal, payload: dict, *, shop_id: int | None = None
 ) -> Goods:
     shop = resolve_seller_shop(db, principal, shop_id)
     assert_shop_operational(shop)
+    _assert_category_open(db, payload.get("category_id"))
     goods = GoodsDAO(db).create(
         shop_id=shop.id,
         category_id=payload.get("category_id"),
@@ -1040,6 +1077,8 @@ def update_goods(
     shop = resolve_seller_shop(db, principal, shop_id)
     assert_shop_operational(shop)
     goods = get_shop_goods(db, principal, goods_id, shop_id=shop_id)
+    if "category_id" in payload:
+        _assert_category_open(db, payload.get("category_id"))
     for field in ("category_id", "name", "main_image", "images", "detail", "original_price_fen"):
         if field in payload:
             setattr(goods, field, payload[field])
@@ -1056,6 +1095,7 @@ def set_goods_status(
         assert_shop_operational(shop)
     goods = get_shop_goods(db, principal, goods_id, shop_id=shop_id)
     if on:
+        _assert_category_open(db, goods.category_id)
         if goods.stock <= 0:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="商品库存不能为 0")
         goods.status = GoodsStatus.ON

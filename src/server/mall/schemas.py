@@ -43,6 +43,7 @@ class CategoryCreate(BaseModel):
     parent_id: int | None = None
     sort: int = Field(default=0, ge=0)
     icon: str | None = Field(default=None, max_length=500)
+    requires_special_license: bool = False
 
 
 class CategoryOut(BaseModel):
@@ -52,6 +53,7 @@ class CategoryOut(BaseModel):
     level: int
     sort: int
     icon: str | None
+    requires_special_license: bool
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -73,6 +75,7 @@ class ShopApply(BaseModel):
     contact_phone: str = Field(..., min_length=5, max_length=32)
     business_license_valid_until: date | None = None
     business_license_long_term: bool = False
+    special_license_not_required: Literal[True]
 
 
 class ShopUpdate(BaseModel):
@@ -146,6 +149,7 @@ class ShopOut(BaseModel):
     contact_phone: str | None
     business_license_valid_until: date | None
     business_license_long_term: bool
+    special_license_not_required: bool
     merchant_agreement_version: str | None
     merchant_agreement_asset_id: str | None
     agreement_accepted_at: datetime | None
@@ -194,6 +198,7 @@ class ShopReviewIn(BaseModel):
     registration_status_valid: bool
     registered_address_matches: bool
     business_scope_matches: bool
+    special_license_scope_allowed: bool
     note: str | None = Field(default=None, max_length=1000)
 
 

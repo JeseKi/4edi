@@ -106,6 +106,16 @@ def test_agreement_hash_migration_preserves_existing_digest(tmp_path: Path) -> N
         assert "signature_mode" in columns
         assert "acceptance_ip" in columns
         assert "acceptance_user_agent" in columns
+        shop_columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(mall_shops)")
+        }
+        assert "special_license_not_required" in shop_columns
+        category_columns = {
+            str(row[1])
+            for row in connection.execute("PRAGMA table_info(mall_categories)")
+        }
+        assert "requires_special_license" in category_columns
         row = connection.execute(
             """
             SELECT draft_content_sha256, final_file_sha256, signature_mode,
@@ -116,6 +126,7 @@ def test_agreement_hash_migration_preserves_existing_digest(tmp_path: Path) -> N
         ).fetchone()
         assert row == ("a" * 64, None, "uploaded_document", None, None)
         shop = connection.execute(
-            "SELECT current_agreement_id FROM mall_shops WHERE id = 999"
+            "SELECT current_agreement_id, special_license_not_required "
+            "FROM mall_shops WHERE id = 999"
         ).fetchone()
-        assert shop == (1,)
+        assert shop == (1, 0)

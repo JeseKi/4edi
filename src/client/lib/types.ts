@@ -507,6 +507,7 @@ export interface MallCategory {
   name: string
   sort: number
   icon: string | null
+  requires_special_license: boolean
   children?: MallCategory[]
 }
 
@@ -564,6 +565,7 @@ export interface MallShop extends MallShopPublic {
   contact_phone: string | null
   business_license_valid_until: string | null
   business_license_long_term: boolean
+  special_license_not_required: boolean
   merchant_agreement_version: string | null
   merchant_agreement_asset_id: string | null
   agreement_accepted_at: string | null

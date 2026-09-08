@@ -51,7 +51,15 @@ def _utcnow() -> datetime:
 
 
 class CategoryDAO(BaseDAO):
-    def create(self, name: str, *, parent_id: int | None, sort: int, icon: str | None) -> Category:
+    def create(
+        self,
+        name: str,
+        *,
+        parent_id: int | None,
+        sort: int,
+        icon: str | None,
+        requires_special_license: bool = False,
+    ) -> Category:
         exists = (
             self.db_session.query(Category)
             .filter(Category.name == name, Category.parent_id == parent_id)
@@ -65,7 +73,14 @@ class CategoryDAO(BaseDAO):
             if parent is None:
                 raise ValueError("上级分类不存在")
             level = parent.level + 1
-        category = Category(name=name, parent_id=parent_id, level=level, sort=sort, icon=icon)
+        category = Category(
+            name=name,
+            parent_id=parent_id,
+            level=level,
+            sort=sort,
+            icon=icon,
+            requires_special_license=requires_special_license,
+        )
         self.db_session.add(category)
         self.db_session.flush()
         return category
@@ -79,6 +94,23 @@ class CategoryDAO(BaseDAO):
             .order_by(Category.level.asc(), Category.sort.asc(), Category.id.asc())
             .all()
         )
+
+    def list_open(self) -> list[Category]:
+        categories = self.list_all()
+        restricted_ids = {
+            category.id for category in categories if category.requires_special_license
+        }
+        changed = True
+        while changed:
+            changed = False
+            for category in categories:
+                if (
+                    category.parent_id in restricted_ids
+                    and category.id not in restricted_ids
+                ):
+                    restricted_ids.add(category.id)
+                    changed = True
+        return [category for category in categories if category.id not in restricted_ids]
 
     def delete(self, category_id: int) -> None:
         self.db_session.query(Category).filter(Category.id == category_id).delete()

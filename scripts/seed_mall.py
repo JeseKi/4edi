@@ -26,6 +26,8 @@ from src.server.auth.dependencies.current_user import AuthenticatedPrincipal
 from src.server.auth.models import User
 from src.server.auth.schemas import UserRole
 from src.server.database import run_in_new_session
+from src.server.files.models import FileAsset
+from src.server.files.service import short_transactions as file_transactions
 from src.server.mall.config import mall_config
 from src.server.mall.dao import (
     AddressDAO,
@@ -38,7 +40,15 @@ from src.server.mall.dao import (
     ShopDAO,
     WalletDAO,
 )
-from src.server.mall.models import Goods, GoodsStatus, OrderStatus, Shop, ShopStatus
+from src.server.mall.models import (
+    Goods,
+    GoodsStatus,
+    OrderStatus,
+    Shop,
+    ShopOnboardingStage,
+    ShopQualificationReview,
+    ShopStatus,
+)
 from src.server.mall.service import short_transactions as service
 from src.server.information.dao import InformationPostDAO
 from src.server.information.models import InformationPost, InformationStatus
@@ -88,6 +98,9 @@ CATEGORIES = [
     ("家居日用", None, 4),
     ("杯壶水具", "家居日用", 1),
 ]
+
+RESTRICTED_CATEGORY_NAMES = {"食品生鲜", "休闲零食"}
+SEED_QUALIFICATION_EVIDENCE_ASSET_ID = "5eed0000000000000000000000000000"
 
 
 GOODS: list[GoodsSeed] = [
@@ -1867,9 +1880,11 @@ def _ensure_categories(db) -> dict[str, int]:
                 parent_id=parent_id,
                 sort=sort,
                 icon=None,
+                requires_special_license=name in RESTRICTED_CATEGORY_NAMES,
             )
         else:
             existing.sort = sort
+            existing.requires_special_license = name in RESTRICTED_CATEGORY_NAMES
         category_map[name] = existing.id
 
     return category_map
@@ -1890,9 +1905,94 @@ def _ensure_shop(db, seller: User, *, name: str, description: str) -> Shop:
         shop.description = description
         shop.avatar = "/mall/shop-avatar.svg"
 
-    if shop.status != ShopStatus.APPROVED:
-        shop.status = ShopStatus.APPROVED
-        shop.approved_at = shop.approved_at or service._utcnow()
+    now = service._utcnow()
+    shop.special_license_not_required = True
+    shop.business_license_long_term = True
+
+    review = (
+        db.get(ShopQualificationReview, shop.last_qualification_review_id)
+        if shop.last_qualification_review_id is not None
+        else None
+    )
+    valid_until = (
+        service._qualification_review_valid_until(shop, review)
+        if review is not None and review.result == "preapproved"
+        else None
+    )
+    if valid_until is None or valid_until <= now:
+        reviewer = next(
+            (
+                user
+                for user in UserDAO(db).list_all()
+                if user.role in {UserRole.ADMIN, UserRole.SUPER_ADMIN}
+            ),
+            None,
+        )
+        if reviewer is None:
+            raise RuntimeError("缺少管理员账号，无法生成商城演示资质审核记录")
+
+        evidence_asset = db.get(FileAsset, SEED_QUALIFICATION_EVIDENCE_ASSET_ID)
+        if evidence_asset is None:
+            evidence_asset = FileAsset(
+                id=SEED_QUALIFICATION_EVIDENCE_ASSET_ID,
+                created_by_user_id=reviewer.id,
+                storage_driver=global_config.files.storage_driver,
+                storage_key=(
+                    f"file-assets/{SEED_QUALIFICATION_EVIDENCE_ASSET_ID}.png"
+                ),
+                original_filename="商城演示数据资质核验占位文件.png",
+                content_type="image/png",
+                size_bytes=1,
+                status="available",
+                scan_status="not_requested",
+                upload_expires_at=now,
+                uploaded_at=now,
+            )
+            db.add(evidence_asset)
+            db.flush()
+
+        checklist = {
+            "entity_name_matches": True,
+            "credit_code_matches": True,
+            "legal_representative_matches": True,
+            "registration_status_valid": True,
+            "registered_address_matches": True,
+            "business_scope_matches": True,
+            "special_license_scope_allowed": True,
+        }
+        review = ShopQualificationReview(
+            shop_id=shop.id,
+            result="preapproved",
+            verification_source="商城演示数据初始化（非真实企业核验）",
+            checked_at=now,
+            reviewer_user_id=reviewer.id,
+            evidence_asset_id=evidence_asset.id,
+            registration_status="存续（演示数据）",
+            checklist=checklist,
+            note="仅用于本地开发和自动化测试，不代表真实企业资质核验结果。",
+        )
+        db.add(review)
+        db.flush()
+        file_transactions.attach_asset_reference(
+            db,
+            asset_id=evidence_asset.id,
+            resource_type="shop_qualification_review",
+            resource_id=review.id,
+            purpose="enterprise_registry_evidence",
+        )
+        valid_until = service._qualification_review_valid_until(shop, review)
+
+    assert review is not None
+    assert valid_until is not None
+    shop.status = ShopStatus.APPROVED
+    shop.onboarding_stage = ShopOnboardingStage.APPROVED.value
+    shop.reject_reason = None
+    shop.closed_at = None
+    shop.approved_at = shop.approved_at or now
+    shop.last_qualification_review_id = review.id
+    shop.last_qualification_checked_at = review.checked_at
+    shop.registration_status = review.registration_status
+    shop.qualification_valid_until = valid_until
 
     wallet = WalletDAO(db).get_or_create(shop.id)
     shop.deposit_fen = mall_config.default_deposit_fen
@@ -2190,7 +2290,10 @@ def _seed(db, *, assets: dict[str, list[str]]) -> None:
             db, seller, name=shop_cfg["name"], description=shop_cfg["description"]
         )
         shop_goods = [
-            item for item in GOODS if item["category"] in shop_cfg["categories"]
+            item
+            for item in GOODS
+            if item["category"] in shop_cfg["categories"]
+            and item["category"] not in RESTRICTED_CATEGORY_NAMES
         ]
         goods_list = _seed_goods(
             db,

@@ -239,7 +239,7 @@ user_agreement_version = "2026-09-02"
 # 当前隐私政策版本，对应 legal_documents 目录文件名。
 privacy_policy_version = "2026-09-02"
 # 当前商家入驻协议版本，对应 legal_documents 目录文件名。
-merchant_agreement_version = "2026-09-03"
+merchant_agreement_version = "2026-09-07"
 # 仅在三份文档经过业务和法务确认后，才允许生产部署设为 true。
 legal_documents_approved = false
 # 合规材料释放后的最短留存天数。

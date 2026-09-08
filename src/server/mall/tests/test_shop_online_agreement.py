@@ -62,12 +62,13 @@ def test_preapproval_generates_and_online_acceptance_archives_agreement(
     seller_headers, admin_headers, shop_id, agreement = _prepare_online_agreement(
         test_client
     )
-    assert agreement["document_version"] == "2026-09-03"
+    assert agreement["document_version"] == "2026-09-07"
     assert agreement["signature_mode"] == "online_click"
     assert agreement["status"] == "generated"
     assert "甲方（平台）" in agreement["content_markdown"]
     assert "乙方（商家）" in agreement["content_markdown"]
     assert "内容 SHA-256" not in agreement["content_markdown"]
+    assert "暂不接受依法需取得专项行政许可" in agreement["content_markdown"]
 
     admin_agreement = test_client.get(
         f"/api/mall/admin/shops/{shop_id}/agreement", headers=admin_headers
@@ -124,7 +125,7 @@ def test_preapproval_generates_and_online_acceptance_archives_agreement(
     assert test_db_session.query(LegalAcceptance).filter_by(
         user_id=stored.merchant_signed_by_user_id,
         document_type="merchant_agreement",
-        document_version="2026-09-03",
+        document_version="2026-09-07",
     ).count() == 1
     assert test_db_session.query(AuditEvent).filter_by(
         action="mall.shop.agreement.accept",
@@ -136,6 +137,108 @@ def test_preapproval_generates_and_online_acceptance_archives_agreement(
     )
     assert approved.status_code == 200, approved.text
     assert approved.json()["status"] == "approved"
+
+
+def test_shop_application_requires_open_scope_confirmation(
+    test_client, init_test_database
+):
+    seller_headers = _login(
+        test_client,
+        username=_register(
+            test_client,
+            username="scope-unconfirmed",
+            email="scope-unconfirmed@example.com",
+        ),
+    )
+    payload = shop_application_payload(
+        test_client, seller_headers, name="范围声明测试店"
+    )
+    payload["special_license_not_required"] = False
+
+    response = test_client.post(
+        "/api/mall/seller/shop/apply", json=payload, headers=seller_headers
+    )
+
+    assert response.status_code == 422
+
+
+def test_shop_preapproval_requires_admin_scope_check(
+    test_client, init_test_database
+):
+    seller_headers = _login(
+        test_client,
+        username=_register(
+            test_client,
+            username="scope-admin-check",
+            email="scope-admin-check@example.com",
+        ),
+    )
+    admin_headers = _login_admin(test_client)
+    applied = test_client.post(
+        "/api/mall/seller/shop/apply",
+        json=shop_application_payload(
+            test_client, seller_headers, name="管理员范围核验测试店"
+        ),
+        headers=seller_headers,
+    )
+    assert applied.status_code == 201, applied.text
+    payload = shop_review_payload(test_client, admin_headers, approved=True)
+    payload["special_license_scope_allowed"] = False
+
+    response = test_client.post(
+        f"/api/mall/admin/shops/{applied.json()['id']}/review",
+        json=payload,
+        headers=admin_headers,
+    )
+
+    assert response.status_code == 422
+    assert "企业核验项目" in response.json()["detail"]
+
+
+def test_special_license_category_is_hidden_and_cannot_receive_goods(
+    test_client, init_test_database
+):
+    seller_headers, admin_headers, shop_id, agreement = _prepare_online_agreement(
+        test_client, username="restricted-category"
+    )
+    accepted = test_client.post(
+        "/api/mall/seller/shop/agreement/accept",
+        json=_acceptance_payload(agreement),
+        headers=seller_headers,
+    )
+    assert accepted.status_code == 200, accepted.text
+    approved = test_client.post(
+        f"/api/mall/admin/shops/{shop_id}/approve", headers=admin_headers
+    )
+    assert approved.status_code == 200, approved.text
+    category = test_client.post(
+        "/api/mall/categories",
+        json={
+            "name": "需要专项许可的测试类目",
+            "sort": 99,
+            "requires_special_license": True,
+        },
+        headers=admin_headers,
+    )
+    assert category.status_code == 201, category.text
+    category_id = category.json()["id"]
+
+    categories = test_client.get("/api/mall/categories")
+    assert categories.status_code == 200
+    assert category_id not in {item["id"] for item in categories.json()}
+
+    goods = test_client.post(
+        "/api/mall/seller/goods",
+        json={
+            "category_id": category_id,
+            "name": "不应允许创建的商品",
+            "main_image": "/mall/goods-1.svg",
+            "skus": [{"price_fen": 100, "stock": 1}],
+        },
+        headers=seller_headers,
+    )
+    assert goods.status_code == 422
+    assert "首期暂不开放" in goods.json()["detail"]
 
 
 def test_online_acceptance_rejects_changed_or_unauthorized_request(

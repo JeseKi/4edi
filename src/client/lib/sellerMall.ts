@@ -61,6 +61,7 @@ export interface MallShopApplicationPayload {
   contact_phone: string
   business_license_valid_until?: string
   business_license_long_term: boolean
+  special_license_not_required: true
 }
 
 export const applyMallShop = async (payload: MallShopApplicationPayload): Promise<MallShop> =>
@@ -329,6 +330,7 @@ export const reviewAdminShop = async (
     registration_status_valid: boolean
     registered_address_matches: boolean
     business_scope_matches: boolean
+    special_license_scope_allowed: boolean
     note?: string
   },
 ): Promise<MallShop> =>

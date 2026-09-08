@@ -30,12 +30,19 @@ export default function ShopQualificationForm({
       ...values,
       business_license_valid_until: values.business_license_valid_until?.format('YYYY-MM-DD'),
       business_license_long_term: Boolean(values.business_license_long_term),
+      special_license_not_required: true,
     })
   }
 
   return (
-    <Form form={form} layout="vertical" initialValues={{ ...initialValues, business_license_long_term: false }}>
-      <Alert className="mb-4" type="info" showIcon message="本阶段只提交企业与经办人资质。平台预审通过后，将生成带协议编号的入驻协议供双方签署。" />
+    <Form form={form} layout="vertical" initialValues={{ ...initialValues, business_license_long_term: false, special_license_not_required: false }}>
+      <Alert
+        className="mb-4"
+        type="warning"
+        showIcon
+        message="首期暂不支持需要专项许可的行业"
+        description="平台首期开放一般商品和技术服务类目；暂不接受依法需取得专项行政许可、备案或专业资质后方可经营的主体、商品或服务。"
+      />
       <Form.Item name="name" label="店铺名称" rules={[{ required: true, message: '请输入店铺名称' }, { min: 2, max: 100 }]}><Input /></Form.Item>
       <Form.Item name="description" label="店铺简介" rules={[{ max: 500 }]}><Input.TextArea rows={2} /></Form.Item>
       <Form.Item name="legal_entity_name" label="企业法定全称" rules={[{ required: true, message: '请输入营业执照上的企业全称' }, { max: 200 }]}><Input /></Form.Item>
@@ -58,6 +65,19 @@ export default function ShopQualificationForm({
           <Space><FileUpload accept={accept} disabled={saving} onUploaded={(asset) => recordUpload(field, asset.id)} />{uploads[field] && <Tag color="green">已上传</Tag>}</Space>
         </Form.Item>
       ))}
+      <Form.Item
+        name="special_license_not_required"
+        valuePropName="checked"
+        rules={[{
+          validator: (_, value) => value
+            ? Promise.resolve()
+            : Promise.reject(new Error('请确认拟经营内容不涉及专项许可行业')),
+        }]}
+      >
+        <Checkbox>
+          我确认拟经营的商品或服务不属于需要专项行政许可、备案或专业资质的行业
+        </Checkbox>
+      </Form.Item>
       <Button type="primary" loading={saving} onClick={() => void submit()}>{submitLabel}</Button>
     </Form>
   )

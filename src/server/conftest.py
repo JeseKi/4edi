@@ -219,7 +219,7 @@ def test_client(
         compliance_config, "legal_entity_credit_code", "91330100123456789X"
     )
     monkeypatch.setattr(
-        compliance_config, "merchant_agreement_version", "2026-09-03"
+        compliance_config, "merchant_agreement_version", "2026-09-07"
     )
     monkeypatch.setattr(compliance_config, "legal_documents_approved", True)
     # 同理，手机号流程测试只验证本地验证码逻辑，不发送真实短信。

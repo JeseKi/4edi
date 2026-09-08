@@ -109,6 +109,7 @@ export default function ShopReviewPage() {
       'registration_status_valid',
       'registered_address_matches',
       'business_scope_matches',
+      'special_license_scope_allowed',
     ]
     if (reviewApproved && checklistFields.some((field) => !values[field])) {
       message.error('通过审核前必须确认全部企业核验项目一致')
@@ -128,6 +129,7 @@ export default function ShopReviewPage() {
         registration_status_valid: Boolean(values.registration_status_valid),
         registered_address_matches: Boolean(values.registered_address_matches),
         business_scope_matches: Boolean(values.business_scope_matches),
+        special_license_scope_allowed: Boolean(values.special_license_scope_allowed),
         note: values.note,
       })
       message.success(reviewApproved ? '企业资质预审已通过，电子协议已自动生成' : '店铺资质已驳回')
@@ -380,6 +382,11 @@ export default function ShopReviewPage() {
               <Descriptions.Item label="注册地址">{record.registered_address || '-'}</Descriptions.Item>
               <Descriptions.Item label="实际经营地址">{record.business_address || '-'}</Descriptions.Item>
               <Descriptions.Item label="营业执照有效期">{record.business_license_long_term ? '长期有效' : record.business_license_valid_until || '-'}</Descriptions.Item>
+              <Descriptions.Item label="首期经营范围声明">
+                <Tag color={record.special_license_not_required ? 'green' : 'red'}>
+                  {record.special_license_not_required ? '已确认不涉及专项许可行业' : '未确认'}
+                </Tag>
+              </Descriptions.Item>
               <Descriptions.Item label="入驻阶段"><Tag color={stageLabel(record).color}>{stageLabel(record).text}</Tag></Descriptions.Item>
               <Descriptions.Item label="审核材料">
                 <div className="flex flex-wrap gap-2">
@@ -455,6 +462,7 @@ export default function ShopReviewPage() {
               ['registration_status_valid', '登记状态正常'],
               ['registered_address_matches', '注册地址一致'],
               ['business_scope_matches', '经营范围与平台业务相符'],
+              ['special_license_scope_allowed', '拟经营内容属于首期开放范围，不涉及专项许可行业'],
             ].map(([field, label]) => <Form.Item key={field} name={field} valuePropName="checked" noStyle><Checkbox>{label}</Checkbox></Form.Item>)}
           </div>
           <Form.Item name="note" label="核验备注" rules={[{ max: 1000 }]}><Input.TextArea rows={2} /></Form.Item>

@@ -173,6 +173,7 @@ async def create_category(
             parent_id=payload.parent_id,
             sort=payload.sort,
             icon=payload.icon,
+            requires_special_license=payload.requires_special_license,
         )
         from src.server.audit import service as audit_service
 
