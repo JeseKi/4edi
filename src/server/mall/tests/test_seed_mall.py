@@ -6,6 +6,7 @@ from datetime import date
 import termios
 
 from scripts import seed_mall
+from src.server.audit.models import AuditEvent
 from src.server.auth.dao import UserDAO
 from src.server.auth.models import LegalAcceptance, User
 from src.server.config import global_config
@@ -326,6 +327,7 @@ def test_compliance_runtime_inputs_complete_workflow_and_public_content(
     assert all(post.status == InformationStatus.APPROVED for post in posts)
     assert all(post.reviewed_by_user_id is not None for post in posts)
     assert all(post.poster_user_id == publisher.id for post in posts)
+    assert test_db_session.query(AuditEvent).count() == 24
     acceptances = test_db_session.query(LegalAcceptance).all()
     assert len(acceptances) == 5
     assert {acceptance.user_id for acceptance in acceptances} == {
@@ -355,3 +357,4 @@ def test_compliance_runtime_inputs_complete_workflow_and_public_content(
     assert test_db_session.query(LegalAcceptance).count() == 5
     assert test_db_session.query(Goods).count() == 17
     assert test_db_session.query(InformationPost).count() == 20
+    assert test_db_session.query(AuditEvent).count() == 24

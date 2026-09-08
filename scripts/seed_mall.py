@@ -33,6 +33,8 @@ from typing import TextIO, TypedDict
 
 from sqlalchemy import text
 
+from src.server.audit import service as audit_service
+from src.server.audit.models import AuditEvent
 from src.server.auth.dao import UserDAO
 from src.server.config import global_config
 from src.server.auth.dependencies.current_user import AuthenticatedPrincipal
@@ -60,6 +62,7 @@ from src.server.mall.models import (
     GoodsStatus,
     OrderStatus,
     Shop,
+    ShopAgreement,
     ShopOnboardingStage,
     ShopQualificationReview,
     ShopStatus,
@@ -2210,6 +2213,52 @@ def _ensure_user(
     return user
 
 
+def _ensure_compliance_audit_event(
+    db,
+    *,
+    actor: User,
+    action: str,
+    action_label: str,
+    resource_type: str,
+    resource_id: int,
+    target_summary: str,
+    detail: dict[str, object] | None = None,
+) -> None:
+    actor_identifier = "seed_mall.operator_confirmed"
+    existing = (
+        db.query(AuditEvent)
+        .filter(
+            AuditEvent.action == action,
+            AuditEvent.resource_type == resource_type,
+            AuditEvent.resource_id == str(resource_id),
+            AuditEvent.actor_identifier == actor_identifier,
+        )
+        .first()
+    )
+    if existing is not None:
+        return
+    audit_service.create_event(
+        db,
+        outcome="success",
+        action=action,
+        action_label=action_label,
+        priority="high",
+        method="SEED",
+        path="scripts/seed_mall.py",
+        path_template="scripts/seed_mall.py",
+        http_status_code=200,
+        actor_user_id=actor.id,
+        actor_username=actor.username,
+        actor_role=actor.role.value,
+        actor_identifier=actor_identifier,
+        resource_type=resource_type,
+        resource_id=resource_id,
+        target_summary=target_summary,
+        user_agent="seed_mall compliance workflow (operator confirmed)",
+        detail={"source": "operator_confirmed_seed", **(detail or {})},
+    )
+
+
 def _ingest_compliance_asset(
     db,
     *,
@@ -3050,6 +3099,70 @@ def _seed_compliance(
                 reviewer_user_id=reviewer.id,
             )
         print(f"  已自动通过 {len(posts_requiring_review)} 条信息发布审核")
+    if auto_complete_compliance_workflow and reviewer is not None:
+        verification = _current_publisher_verification(db, publisher)
+        if verification is not None:
+            _ensure_compliance_audit_event(
+                db,
+                actor=reviewer,
+                action="information.publisher_verification.review",
+                action_label="审核发布者实名",
+                resource_type="publisher_verification",
+                resource_id=verification.id,
+                target_summary=f"发布者 {publisher.username}（{verification.real_name}）",
+                detail={"approved": True},
+            )
+        if shop is not None and shop.platform_verified:
+            _ensure_compliance_audit_event(
+                db,
+                actor=reviewer,
+                action="mall.shop.qualification.pre_review",
+                action_label="商家资质预审",
+                resource_type="shop",
+                resource_id=shop.id,
+                target_summary=f"店铺 {shop.name}",
+                detail={"approved": True},
+            )
+            agreement = (
+                db.query(ShopAgreement)
+                .filter(ShopAgreement.shop_id == shop.id)
+                .order_by(ShopAgreement.id.desc())
+                .first()
+            )
+            if agreement is not None and agreement.merchant_signed_at is not None:
+                _ensure_compliance_audit_event(
+                    db,
+                    actor=merchant,
+                    action="mall.shop.agreement.accept",
+                    action_label="商家确认电子协议",
+                    resource_type="shop_agreement",
+                    resource_id=agreement.id,
+                    target_summary=f"协议 {agreement.agreement_number}",
+                    detail={"signature_mode": agreement.signature_mode},
+                )
+            if shop.status == ShopStatus.APPROVED:
+                _ensure_compliance_audit_event(
+                    db,
+                    actor=reviewer,
+                    action="mall.shop.approve",
+                    action_label="商家最终审核通过",
+                    resource_type="shop",
+                    resource_id=shop.id,
+                    target_summary=f"店铺 {shop.name}",
+                    detail={"approved": True},
+                )
+        for post in posts:
+            if post.status == InformationStatus.APPROVED:
+                _ensure_compliance_audit_event(
+                    db,
+                    actor=reviewer,
+                    action="information.post.review",
+                    action_label="审核信息发布",
+                    resource_type="information",
+                    resource_id=post.id,
+                    target_summary=post.title,
+                    detail={"approved": True},
+                )
     print("整改取证种子数据已准备。")
     print("  商家账号：hddg（密码仅在首次创建账号时设置）")
     print("  发布者账号：互动递归（密码仅在首次创建账号时设置）")
