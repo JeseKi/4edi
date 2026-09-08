@@ -2167,17 +2167,43 @@ def _ensure_user(
     role: str,
     display_name: str | None = None,
 ) -> User:
-    user = UserDAO(db).get_by_username(username)
+    user_dao = UserDAO(db)
+    user = user_dao.get_by_username(username)
     if user is None:
-        user = User(
-            username=username,
-            email=email,
-            phone=phone,
-            name=display_name or username,
-            role=UserRole(role),
-        )
-        user.set_password(password)
-        db.add(user)
+        matches = {
+            candidate.id: candidate
+            for candidate in (
+                user_dao.get_by_email(email),
+                user_dao.get_by_phone(phone) if phone else None,
+            )
+            if candidate is not None
+        }
+        if len(matches) > 1:
+            raise RuntimeError(
+                f"Seed 账号「{username}」的邮箱和手机号分别属于不同用户"
+            )
+        user = next(iter(matches.values()), None)
+        if user is not None:
+            if not user.username.startswith("user_") or user.role != UserRole.USER:
+                raise RuntimeError(
+                    f"Seed 账号「{username}」的邮箱或手机号已被其他正式账号占用"
+                )
+            user.username = username
+            user.email = email
+            user.phone = phone
+            user.name = display_name or username
+            user.set_password(password)
+            print(f"  已将实名注册账号归并为整改账号「{username}」")
+        else:
+            user = User(
+                username=username,
+                email=email,
+                phone=phone,
+                name=display_name or username,
+                role=UserRole(role),
+            )
+            user.set_password(password)
+            db.add(user)
         db.flush()
     elif display_name:
         user.name = display_name

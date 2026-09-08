@@ -7,7 +7,7 @@ import termios
 
 from scripts import seed_mall
 from src.server.auth.dao import UserDAO
-from src.server.auth.models import LegalAcceptance
+from src.server.auth.models import LegalAcceptance, User
 from src.server.config import global_config
 from src.server.files.models import FileAsset
 from src.server.information.models import (
@@ -139,6 +139,36 @@ def test_seed_shop_has_current_qualification_before_goods_are_created(
     )
 
     assert goods.shop_id == shop.id
+
+
+def test_seed_user_adopts_matching_self_registered_account(
+    test_db_session, init_test_database
+):
+    registered = User(
+        username="user_ab12cd34",
+        email="registered@example.com",
+        phone="19935644212",
+        name=None,
+    )
+    registered.set_password("old-password")
+    test_db_session.add(registered)
+    test_db_session.flush()
+
+    seeded = seed_mall._ensure_user(
+        test_db_session,
+        username="互动递归",
+        password="88888888",
+        email="publisher@hemu.site",
+        phone="19935644212",
+        role="user",
+        display_name="王勃智",
+    )
+
+    assert seeded.id == registered.id
+    assert seeded.username == "互动递归"
+    assert seeded.email == "publisher@hemu.site"
+    assert seeded.name == "王勃智"
+    assert seeded.check_password("88888888") is True
 
 
 def test_compliance_seed_never_fabricates_reviews_or_public_content(
