@@ -1,22 +1,35 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""商城演示数据 Seed（可重复执行）。
+"""商城种子数据（可重复执行）。
 
 运行：
+    # 默认准备整改取证用的真实主体账号与内容；传入材料后自动完成审核与签约。
     .venv/bin/python scripts/seed_mall.py
+
+    # 仅在 dev/test 环境生成原有的商城演示数据。
+    .venv/bin/python scripts/seed_mall.py --profile demo
+
+    # dev/test 环境可先清空商城数据。
     .venv/bin/python scripts/seed_mall.py --reset
 """
 
 from __future__ import annotations
 
 import argparse
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass
+from datetime import date, datetime, timedelta, timezone
+import getpass
+import hashlib
+import mimetypes
+import os
 from pathlib import Path
+import re
 import sys
+import termios
 
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
-from typing import TypedDict
+from typing import TextIO, TypedDict
 
 from sqlalchemy import text
 
@@ -25,9 +38,11 @@ from src.server.config import global_config
 from src.server.auth.dependencies.current_user import AuthenticatedPrincipal
 from src.server.auth.models import User
 from src.server.auth.schemas import UserRole
+from src.server.auth.service import short_transactions as auth_transactions
 from src.server.database import run_in_new_session
 from src.server.files.models import FileAsset
 from src.server.files.service import short_transactions as file_transactions
+from src.server.files.storage import LocalFileStorage, get_file_storage
 from src.server.mall.config import mall_config
 from src.server.mall.dao import (
     AddressDAO,
@@ -51,10 +66,13 @@ from src.server.mall.models import (
 )
 from src.server.mall.service import short_transactions as service
 from src.server.information.dao import InformationPostDAO
-from src.server.information.models import InformationPost, InformationStatus
-
-if global_config.app.env not in {"dev", "test"}:
-    raise SystemExit("商城演示 Seed 仅允许在 dev/test 环境运行")
+from src.server.information.models import (
+    InformationPost,
+    InformationStatus,
+    PublisherVerification,
+    PublisherVerificationStatus,
+)
+from src.server.information.service import short_transactions as information_service
 
 
 class GoodsSeed(TypedDict):
@@ -62,7 +80,7 @@ class GoodsSeed(TypedDict):
     category: str
     name: str
     fallback_image: str
-    original_price_fen: int
+    original_price_fen: int | None
     detail: str
     skus: list[dict]
 
@@ -81,6 +99,35 @@ class InformationSeed(TypedDict):
     view_count: int
     age_days: int
     reject_reason: str | None
+
+
+class ComplianceInformationSeed(TypedDict):
+    title: str
+    category: str
+    price: str
+    content: str
+    contact_name: str
+    contact_phone: str
+    attributes: dict[str, str]
+
+
+@dataclass(frozen=True)
+class ComplianceApplicationInputs:
+    merchant_business_license_path: Path | None = None
+    merchant_identity_front_path: Path | None = None
+    merchant_identity_back_path: Path | None = None
+    merchant_authorization_path: Path | None = None
+    merchant_identity_number: str | None = None
+    merchant_applicant_name: str | None = None
+    merchant_business_address: str | None = None
+    merchant_contact_phone: str | None = None
+    merchant_license_valid_until: date | None = None
+    merchant_license_long_term: bool = False
+    publisher_identity_front_path: Path | None = None
+    publisher_identity_back_path: Path | None = None
+    publisher_identity_number: str | None = None
+    publisher_document_valid_until: date | None = None
+    publisher_document_long_term: bool = False
 
 
 CATEGORIES = [
@@ -901,6 +948,205 @@ GOODS.extend(
 )
 
 
+COMPLIANCE_CATEGORIES = [
+    ("企业服务", None, 0),
+    ("网站建设", "企业服务", 1),
+    ("软件开发", "企业服务", 2),
+]
+
+COMPLIANCE_WEBSITE_IMAGE_URL = (
+    "https://tuchuang.s3.fstc.kispace.cn/1/"
+    "object_def9376fb2ae46608b669a3b15672f4f_18-website-delivery.webp"
+)
+COMPLIANCE_SOFTWARE_IMAGE_URL = (
+    "https://tuchuang.s3.fstc.kispace.cn/1/"
+    "object_17e42206db8f417685cc92ff97b160d8_19-software-delivery.webp"
+)
+
+# 整改取证商品使用“业务场景封面 + 通用交付效果图”的两图组合。
+# 图片托管在公开 KiVault 对象存储中，不将二进制文件纳入 Git。
+COMPLIANCE_ASSET_URLS: dict[str, list[str]] = {
+    "responsive-website-service": [
+        "https://tuchuang.s3.fstc.kispace.cn/1/"
+        "object_97bb59f0337f4226befe8de4d49d351d_01-responsive-website.webp",
+        COMPLIANCE_WEBSITE_IMAGE_URL,
+    ],
+    "mini-program-service": [
+        "https://tuchuang.s3.fstc.kispace.cn/1/"
+        "object_87cb42fae91e42b9828b2a96beaac64a_02-mini-program.webp",
+        COMPLIANCE_SOFTWARE_IMAGE_URL,
+    ],
+    "information-service-01": [
+        "https://tuchuang.s3.fstc.kispace.cn/1/"
+        "object_fd8a397032cb4839a1a942633ec29661_03-restaurant-ordering.webp",
+        COMPLIANCE_SOFTWARE_IMAGE_URL,
+    ],
+    "information-service-02": [
+        "https://tuchuang.s3.fstc.kispace.cn/1/"
+        "object_427582de49684f05adfbb33184fe5b54_04-appointment-booking.webp",
+        COMPLIANCE_SOFTWARE_IMAGE_URL,
+    ],
+    "information-service-04": [
+        "https://tuchuang.s3.fstc.kispace.cn/1/"
+        "object_1a091db1bde74e02a1917bb17eba225e_05-fitness-app.webp",
+        COMPLIANCE_SOFTWARE_IMAGE_URL,
+    ],
+    "information-service-07": [
+        "https://tuchuang.s3.fstc.kispace.cn/1/"
+        "object_7ebf3504308c4afb87b4f830e1c8b318_06-inventory-management.webp",
+        COMPLIANCE_SOFTWARE_IMAGE_URL,
+    ],
+    "information-service-08": [
+        "https://tuchuang.s3.fstc.kispace.cn/1/"
+        "object_49e1b2712eb64a48a47d465fe24d80eb_07-lab-scheduling.webp",
+        COMPLIANCE_SOFTWARE_IMAGE_URL,
+    ],
+    "information-service-10": [
+        "https://tuchuang.s3.fstc.kispace.cn/1/"
+        "object_027abcd9f8d14249a3b4d2c322a4a31c_09-cms-website.webp",
+        COMPLIANCE_WEBSITE_IMAGE_URL,
+    ],
+    "information-service-11": [
+        "https://tuchuang.s3.fstc.kispace.cn/1/"
+        "object_a668f90c22a1409b8656dd92643b5d4c_08-marketing-landing-page.webp",
+        COMPLIANCE_WEBSITE_IMAGE_URL,
+    ],
+    "information-service-13": [
+        "https://tuchuang.s3.fstc.kispace.cn/1/"
+        "object_34ffb890a61342288206dc8a76c51773_10-smart-property.webp",
+        COMPLIANCE_SOFTWARE_IMAGE_URL,
+    ],
+    "information-service-14": [
+        "https://tuchuang.s3.fstc.kispace.cn/1/"
+        "object_8562b038d1d94cde990c2989d1f42611_11-campus-marketplace.webp",
+        COMPLIANCE_SOFTWARE_IMAGE_URL,
+    ],
+    "information-service-15": [
+        "https://tuchuang.s3.fstc.kispace.cn/1/"
+        "object_29589fdf37d042bbad3865a337256b65_12-pet-clinic.webp",
+        COMPLIANCE_SOFTWARE_IMAGE_URL,
+    ],
+    "information-service-16": [
+        "https://tuchuang.s3.fstc.kispace.cn/1/"
+        "object_4533181a2a8b465c8605fed90c01036f_13-store-inspection.webp",
+        COMPLIANCE_SOFTWARE_IMAGE_URL,
+    ],
+    "information-service-17": [
+        "https://tuchuang.s3.fstc.kispace.cn/1/"
+        "object_d574562906ce42bcada0096d6f6a604c_14-school-scheduling.webp",
+        COMPLIANCE_SOFTWARE_IMAGE_URL,
+    ],
+    "information-service-18": [
+        "https://tuchuang.s3.fstc.kispace.cn/1/"
+        "object_475060e0b7084b65b9d25a681d60b028_15-membership-pos.webp",
+        COMPLIANCE_SOFTWARE_IMAGE_URL,
+    ],
+    "information-service-19": [
+        "https://tuchuang.s3.fstc.kispace.cn/1/"
+        "object_4f87cdf03def4fd892d7fa228ee51c21_16-multilingual-seo.webp",
+        COMPLIANCE_WEBSITE_IMAGE_URL,
+    ],
+    "information-service-20": [
+        "https://tuchuang.s3.fstc.kispace.cn/1/"
+        "object_fc599939ab6f411ea4835bd6280b88e5_17-association-portal.webp",
+        COMPLIANCE_WEBSITE_IMAGE_URL,
+    ],
+}
+
+COMPLIANCE_GOODS: list[GoodsSeed] = [
+    {
+        "slug": "responsive-website-service",
+        "category": "网站建设",
+        "name": "响应式企业官网建设服务",
+        "fallback_image": COMPLIANCE_WEBSITE_IMAGE_URL,
+        "original_price_fen": None,
+        "detail": (
+            "由杭州互动递归科技有限公司提供的企业官网建设服务。服务范围包括需求梳理、信息架构、"
+            "响应式页面设计、前后端开发、内容管理后台配置、部署上线协助和基础使用培训。\n\n"
+            "基础方案适用于企业介绍、产品与服务展示、案例展示、新闻动态、联系我们等常见栏目。"
+            "项目开始前，双方将根据实际需求确认页面数量、功能边界、交付周期、验收标准和后续维护方式。\n\n"
+            "商品页面价格为基础方案参考价，不包含域名、云服务器、第三方短信、支付、地图等外部服务费用。"
+            "最终服务内容和价格以双方确认的需求清单及订单约定为准。"
+        ),
+        "skus": [
+            {
+                "sku_code": "HDDG-WEB-BASE",
+                "specs": {"服务方案": "企业官网基础版"},
+                "price_fen": 350000,
+                "stock": 10,
+            }
+        ],
+    },
+    {
+        "slug": "mini-program-service",
+        "category": "软件开发",
+        "name": "小程序定制开发服务",
+        "fallback_image": COMPLIANCE_SOFTWARE_IMAGE_URL,
+        "original_price_fen": None,
+        "detail": (
+            "由杭州互动递归科技有限公司提供的小程序定制开发服务。服务流程包括需求访谈、原型确认、"
+            "界面设计、功能开发、测试验收、上线协助和操作说明。\n\n"
+            "可根据企业展示、预约报名、客户服务、内部协作等一般业务场景进行功能设计。"
+            "如项目涉及支付、医疗、教育、食品、地图定位或其他依法需要行政许可的业务，"
+            "将在核验委托方资质及平台准入范围后另行确定是否承接。\n\n"
+            "商品页面价格为基础需求评估后的起始参考价。具体功能、工期、交付物、知识产权归属和"
+            "维护范围以双方确认的需求清单及订单约定为准。"
+        ),
+        "skus": [
+            {
+                "sku_code": "HDDG-MINI-BASE",
+                "specs": {"服务方案": "基础定制版"},
+                "price_fen": 800000,
+                "stock": 10,
+            }
+        ],
+    },
+]
+
+COMPLIANCE_INFORMATION_POST: ComplianceInformationSeed = {
+    "title": "响应式企业官网建设，含后台内容管理",
+    "category": "website",
+    "price": "3,500 元起",
+    "content": (
+        "杭州互动递归科技有限公司提供响应式企业官网设计与开发服务，适用于企业介绍、产品与服务展示、"
+        "案例展示、新闻动态和联系信息等一般企业宣传场景。网站可适配电脑、平板和手机访问，并配置基础"
+        "内容管理后台，便于企业自行维护公开内容。\n\n"
+        "标准流程包括需求沟通、栏目与页面清单确认、原型或设计稿确认、开发测试、验收和部署上线协助。"
+        "交付内容、工期、验收标准及后续维护范围将在项目开始前书面确认。\n\n"
+        "页面标示价格为基础方案参考价，不包含域名、云服务器以及短信、支付、地图等第三方服务费用。"
+        "如业务内容依法需要专项许可，将在核验相关资质后再确定是否提供服务。"
+    ),
+    "contact_name": "王勃智",
+    "contact_phone": "19935644212",
+    "attributes": {
+        "site_type": "企业官网",
+        "responsive": "是",
+        "backend": "内容管理后台",
+        "deliverable": "定制开发",
+    },
+}
+
+COMPLIANCE_MERCHANT_USERNAME = "hddg"
+COMPLIANCE_MERCHANT_PASSWORD = "88888888"
+COMPLIANCE_MERCHANT_EMAIL = "hddg@hemu.site"
+COMPLIANCE_MERCHANT_NAME = "互动递归"
+COMPLIANCE_SHOP_NAME = "互动递归官方旗舰店"
+COMPLIANCE_SHOP_DESCRIPTION = (
+    "杭州互动递归科技有限公司直营网店，提供企业官网、小程序及一般软件定制开发服务。"
+)
+COMPLIANCE_MERCHANT_ENTITY_NAME = "杭州互动递归科技有限公司"
+COMPLIANCE_MERCHANT_CREDIT_CODE = "91330108MAKCCCHP50"
+COMPLIANCE_MERCHANT_LEGAL_REPRESENTATIVE = "周子轩"
+COMPLIANCE_MERCHANT_REGISTERED_ADDRESS = (
+    "浙江省杭州市滨江区浦沿街道清昀街422号2号楼2层0772室"
+)
+COMPLIANCE_MERCHANT_DEFAULT_CONTACT_PHONE = "19935644212"
+COMPLIANCE_PUBLISHER_USERNAME = "互动递归"
+COMPLIANCE_PUBLISHER_PASSWORD = "88888888"
+COMPLIANCE_PUBLISHER_EMAIL = "publisher@hemu.site"
+COMPLIANCE_PUBLISHER_PHONE = "19935644212"
+COMPLIANCE_PUBLISHER_REAL_NAME = "王勃智"
+
 SELLER_USERNAME = "seller"
 SELLER_PASSWORD = "seller123"
 SELLER_EMAIL = "seller@example.com"
@@ -917,7 +1163,7 @@ SELLER3_EMAIL = "seller3@example.com"
 SELLER3_PHONE = "13800000004"
 
 BUYER_USERNAME = "buyer"
-BUYER_PASSWORD = "buyer123"
+BUYER_PASSWORD = "88888888"
 BUYER_EMAIL = "buyer@example.com"
 BUYER_PHONE = "13800000002"
 
@@ -952,7 +1198,7 @@ INFORMATION_POSTS: list[InformationSeed] = [
             "secondary_dev": "是",
             "industry": "餐饮零售",
             "language": "TypeScript",
-            "database": "MySQL"
+            "database": "MySQL",
         },
         "poster": SELLER_USERNAME,
         "status": InformationStatus.APPROVED,
@@ -989,7 +1235,7 @@ INFORMATION_POSTS: list[InformationSeed] = [
             "secondary_dev": "是",
             "industry": "教育培训",
             "language": "JavaScript",
-            "database": "PostgreSQL"
+            "database": "PostgreSQL",
         },
         "poster": SELLER2_USERNAME,
         "status": InformationStatus.APPROVED,
@@ -1028,7 +1274,7 @@ INFORMATION_POSTS: list[InformationSeed] = [
             "secondary_dev": "否",
             "industry": "企业服务",
             "language": "Vue",
-            "database": "MySQL"
+            "database": "MySQL",
         },
         "poster": SELLER3_USERNAME,
         "status": InformationStatus.APPROVED,
@@ -1067,7 +1313,7 @@ INFORMATION_POSTS: list[InformationSeed] = [
             "secondary_dev": "是",
             "platform": "跨平台",
             "industry": "运动健康",
-            "language": "Flutter"
+            "language": "Flutter",
         },
         "poster": SELLER_USERNAME,
         "status": InformationStatus.APPROVED,
@@ -1106,7 +1352,7 @@ INFORMATION_POSTS: list[InformationSeed] = [
             "secondary_dev": "否",
             "platform": "Android",
             "industry": "生活服务",
-            "language": "Kotlin"
+            "language": "Kotlin",
         },
         "poster": SELLER2_USERNAME,
         "status": InformationStatus.APPROVED,
@@ -1144,7 +1390,7 @@ INFORMATION_POSTS: list[InformationSeed] = [
             "secondary_dev": "是",
             "platform": "跨平台",
             "industry": "企业服务",
-            "language": "React Native"
+            "language": "React Native",
         },
         "poster": BUYER_USERNAME,
         "status": InformationStatus.PENDING,
@@ -1181,7 +1427,7 @@ INFORMATION_POSTS: list[InformationSeed] = [
             "language": "Python",
             "platform": "Web",
             "deliverable": "定制开发",
-            "function": "采购销售、库存预警、盘点报表和权限管理"
+            "function": "采购销售、库存预警、盘点报表和权限管理",
         },
         "poster": SELLER3_USERNAME,
         "status": InformationStatus.APPROVED,
@@ -1218,7 +1464,7 @@ INFORMATION_POSTS: list[InformationSeed] = [
             "language": "Java",
             "platform": "Linux",
             "deliverable": "源码",
-            "function": "设备预约、审批、排班、使用记录和数据导出"
+            "function": "设备预约、审批、排班、使用记录和数据导出",
         },
         "poster": SELLER_USERNAME,
         "status": InformationStatus.APPROVED,
@@ -1255,7 +1501,7 @@ INFORMATION_POSTS: list[InformationSeed] = [
             "language": "TypeScript",
             "platform": "Web",
             "deliverable": "定制开发",
-            "function": "旧系统评估、数据迁移和后台重构"
+            "function": "旧系统评估、数据迁移和后台重构",
         },
         "poster": BUYER_USERNAME,
         "status": InformationStatus.REJECTED,
@@ -1293,7 +1539,7 @@ INFORMATION_POSTS: list[InformationSeed] = [
             "site_type": "企业官网",
             "responsive": "是",
             "backend": "Django",
-            "deliverable": "源码"
+            "deliverable": "源码",
         },
         "poster": SELLER2_USERNAME,
         "status": InformationStatus.APPROVED,
@@ -1330,7 +1576,7 @@ INFORMATION_POSTS: list[InformationSeed] = [
             "site_type": "营销落地页",
             "responsive": "是",
             "backend": "无",
-            "deliverable": "成品"
+            "deliverable": "成品",
         },
         "poster": SELLER3_USERNAME,
         "status": InformationStatus.APPROVED,
@@ -1365,7 +1611,7 @@ INFORMATION_POSTS: list[InformationSeed] = [
             "site_type": "门户网站",
             "responsive": "是",
             "backend": "Node.js",
-            "deliverable": "定制开发"
+            "deliverable": "定制开发",
         },
         "poster": BUYER_USERNAME,
         "status": InformationStatus.REJECTED,
@@ -1408,7 +1654,7 @@ INFORMATION_POSTS: list[InformationSeed] = [
             "secondary_dev": "是",
             "industry": "物业服务",
             "language": "TypeScript",
-            "database": "MySQL"
+            "database": "MySQL",
         },
         "poster": SELLER_USERNAME,
         "status": InformationStatus.APPROVED,
@@ -1449,7 +1695,7 @@ INFORMATION_POSTS: list[InformationSeed] = [
             "secondary_dev": "是",
             "industry": "教育校园",
             "language": "JavaScript",
-            "database": "PostgreSQL"
+            "database": "PostgreSQL",
         },
         "poster": SELLER2_USERNAME,
         "status": InformationStatus.APPROVED,
@@ -1494,7 +1740,7 @@ INFORMATION_POSTS: list[InformationSeed] = [
             "secondary_dev": "是",
             "platform": "跨平台",
             "industry": "宠物医疗",
-            "language": "Flutter"
+            "language": "Flutter",
         },
         "poster": SELLER3_USERNAME,
         "status": InformationStatus.APPROVED,
@@ -1539,7 +1785,7 @@ INFORMATION_POSTS: list[InformationSeed] = [
             "secondary_dev": "否",
             "platform": "Android",
             "industry": "连锁零售",
-            "language": "Kotlin"
+            "language": "Kotlin",
         },
         "poster": SELLER_USERNAME,
         "status": InformationStatus.APPROVED,
@@ -1577,7 +1823,7 @@ INFORMATION_POSTS: list[InformationSeed] = [
             "language": "Java",
             "platform": "Web",
             "deliverable": "源码",
-            "function": "智能排课、学生选课、成绩统计和家校互通"
+            "function": "智能排课、学生选课、成绩统计和家校互通",
         },
         "poster": SELLER2_USERNAME,
         "status": InformationStatus.APPROVED,
@@ -1618,7 +1864,7 @@ INFORMATION_POSTS: list[InformationSeed] = [
             "language": "Python",
             "platform": "Windows",
             "deliverable": "成品",
-            "function": "会员储值、收银结算、库存管理和营销报表"
+            "function": "会员储值、收银结算、库存管理和营销报表",
         },
         "poster": SELLER3_USERNAME,
         "status": InformationStatus.APPROVED,
@@ -1659,7 +1905,7 @@ INFORMATION_POSTS: list[InformationSeed] = [
             "site_type": "企业官网",
             "responsive": "是",
             "backend": "WordPress",
-            "deliverable": "成品"
+            "deliverable": "成品",
         },
         "poster": SELLER2_USERNAME,
         "status": InformationStatus.PENDING,
@@ -1700,7 +1946,7 @@ INFORMATION_POSTS: list[InformationSeed] = [
             "site_type": "门户网站",
             "responsive": "是",
             "backend": "Django",
-            "deliverable": "定制开发"
+            "deliverable": "定制开发",
         },
         "poster": SELLER3_USERNAME,
         "status": InformationStatus.APPROVED,
@@ -1712,6 +1958,81 @@ INFORMATION_POSTS: list[InformationSeed] = [
 ]
 
 
+def _compliance_information_catalog() -> list[ComplianceInformationSeed]:
+    catalog: list[ComplianceInformationSeed] = []
+    for item in INFORMATION_POSTS:
+        if item["title"] == COMPLIANCE_INFORMATION_POST["title"]:
+            catalog.append(
+                {
+                    "title": COMPLIANCE_INFORMATION_POST["title"],
+                    "category": COMPLIANCE_INFORMATION_POST["category"],
+                    "price": COMPLIANCE_INFORMATION_POST["price"],
+                    "content": COMPLIANCE_INFORMATION_POST["content"],
+                    "contact_name": COMPLIANCE_INFORMATION_POST["contact_name"],
+                    "contact_phone": COMPLIANCE_INFORMATION_POST["contact_phone"],
+                    "attributes": dict(COMPLIANCE_INFORMATION_POST["attributes"]),
+                }
+            )
+            continue
+        catalog.append(
+            {
+                "title": item["title"],
+                "category": item["category"],
+                "price": item["price"],
+                "content": item["content"],
+                "contact_name": COMPLIANCE_PUBLISHER_REAL_NAME,
+                "contact_phone": COMPLIANCE_PUBLISHER_PHONE,
+                "attributes": dict(item["attributes"]),
+            }
+        )
+    return catalog
+
+
+def _starting_price_fen(price: str) -> int | None:
+    match = re.search(r"([\d,]+)\s*元", price)
+    if match is None:
+        return None
+    return int(match.group(1).replace(",", "")) * 100
+
+
+def _compliance_goods_catalog() -> list[GoodsSeed]:
+    goods = list(COMPLIANCE_GOODS)
+    for index, item in enumerate(_compliance_information_catalog(), start=1):
+        price_fen = _starting_price_fen(item["price"])
+        if price_fen is None:
+            continue
+        is_website = item["category"] == "website"
+        goods.append(
+            {
+                "slug": f"information-service-{index:02d}",
+                "category": "网站建设" if is_website else "软件开发",
+                "name": item["title"],
+                "fallback_image": (
+                    COMPLIANCE_WEBSITE_IMAGE_URL
+                    if is_website
+                    else COMPLIANCE_SOFTWARE_IMAGE_URL
+                ),
+                "original_price_fen": None,
+                "detail": (
+                    f"{item['content']}\n\n"
+                    "本商品由同名信息发布内容生成，信息发布原文仍在信息发布频道独立保留。"
+                    "页面价格为基础方案参考价，具体功能、交付周期、验收标准与最终金额以双方"
+                    "确认的需求清单及订单约定为准。"
+                ),
+                "skus": [
+                    {
+                        "sku_code": f"HDDG-INFO-{index:02d}",
+                        "specs": {
+                            "服务类型": "网站建设" if is_website else "软件开发",
+                            "服务方案": "基础方案",
+                        },
+                        "price_fen": price_fen,
+                        "stock": 10,
+                    }
+                ],
+            }
+        )
+    return goods
 
 
 # 演示店铺配置：每个店铺由独立卖家账号持有（后端约束「一用户一家店」）。
@@ -1842,8 +2163,9 @@ def _ensure_user(
     username: str,
     password: str,
     email: str,
-    phone: str,
+    phone: str | None,
     role: str,
+    display_name: str | None = None,
 ) -> User:
     user = UserDAO(db).get_by_username(username)
     if user is None:
@@ -1851,20 +2173,227 @@ def _ensure_user(
             username=username,
             email=email,
             phone=phone,
-            name=username,
+            name=display_name or username,
             role=UserRole(role),
         )
         user.set_password(password)
         db.add(user)
         db.flush()
+    elif display_name:
+        user.name = display_name
     return user
 
 
-def _ensure_categories(db) -> dict[str, int]:
+def _ingest_compliance_asset(
+    db,
+    *,
+    owner: User,
+    purpose: str,
+    source_path: Path,
+) -> str:
+    path = source_path.expanduser().resolve()
+    if not path.is_file():
+        raise ValueError(f"合规材料文件不存在：{path}")
+    suffix = path.suffix.lower()
+    if suffix not in file_transactions.COMPLIANCE_EXTENSIONS:
+        raise ValueError(f"合规材料格式不支持：{path.name}")
+    size_bytes = path.stat().st_size
+    if size_bytes > global_config.files.max_upload_bytes:
+        raise ValueError(f"合规材料超过上传大小限制：{path.name}")
+
+    storage = get_file_storage()
+    if not isinstance(storage, LocalFileStorage):
+        raise ValueError("非本地文件存储请通过网站页面上传合规材料")
+
+    digest = hashlib.sha256()
+    with path.open("rb") as source:
+        while chunk := source.read(1024 * 1024):
+            digest.update(chunk)
+    identity = f"{owner.id}:{purpose}:{suffix}:{digest.hexdigest()}"
+    asset_id = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
+    storage_key = f"file-assets/{asset_id}{suffix}"
+    with path.open("rb") as source:
+        actual_size = storage.write_from_file(storage_key, source, size_bytes)
+    if actual_size != size_bytes:
+        raise ValueError(f"合规材料写入不完整：{path.name}")
+
+    now = datetime.now(timezone.utc)
+    asset = db.get(FileAsset, asset_id)
+    if asset is None:
+        asset = FileAsset(
+            id=asset_id,
+            created_by_user_id=owner.id,
+            storage_driver=storage.driver,
+            storage_key=storage_key,
+            original_filename=path.name,
+            content_type=mimetypes.guess_type(path.name)[0]
+            or "application/octet-stream",
+            size_bytes=size_bytes,
+            status=file_transactions.STATUS_AVAILABLE,
+            scan_status="not_requested",
+            upload_expires_at=now,
+            uploaded_at=now,
+        )
+        db.add(asset)
+    elif asset.created_by_user_id != owner.id or asset.storage_key != storage_key:
+        raise ValueError(f"合规材料资产冲突：{path.name}")
+    db.flush()
+    return asset.id
+
+
+def _ensure_compliance_shop_application(
+    db,
+    merchant: User,
+    inputs: ComplianceApplicationInputs,
+) -> Shop | None:
+    existing = ShopDAO(db).get_by_owner(merchant.id)
+    if existing is not None:
+        return existing
+    if inputs.merchant_business_license_path is None:
+        return None
+    if not auth_transactions.current_acceptance_status(db, merchant.id)[
+        "all_current_accepted"
+    ]:
+        print("  商家资质未提交：请先用账号「hddg」登录并确认用户协议与隐私政策")
+        return None
+
+    assert inputs.merchant_identity_front_path is not None
+    assert inputs.merchant_identity_back_path is not None
+    assert inputs.merchant_identity_number is not None
+    assert inputs.merchant_applicant_name is not None
+    business_license_asset_id = _ingest_compliance_asset(
+        db,
+        owner=merchant,
+        purpose="merchant_business_license",
+        source_path=inputs.merchant_business_license_path,
+    )
+    identity_front_asset_id = _ingest_compliance_asset(
+        db,
+        owner=merchant,
+        purpose="merchant_identity_front",
+        source_path=inputs.merchant_identity_front_path,
+    )
+    identity_back_asset_id = _ingest_compliance_asset(
+        db,
+        owner=merchant,
+        purpose="merchant_identity_back",
+        source_path=inputs.merchant_identity_back_path,
+    )
+    authorization_asset_id = None
+    if inputs.merchant_authorization_path is not None:
+        authorization_asset_id = _ingest_compliance_asset(
+            db,
+            owner=merchant,
+            purpose="merchant_authorization",
+            source_path=inputs.merchant_authorization_path,
+        )
+    principal = _principal_for_seller(
+        merchant, username=merchant.username, email=merchant.email
+    )
+    shop = service.apply_shop(
+        db,
+        principal,
+        {
+            "name": COMPLIANCE_SHOP_NAME,
+            "description": COMPLIANCE_SHOP_DESCRIPTION,
+            "avatar": "/mall/shop-avatar.svg",
+            "real_name": inputs.merchant_applicant_name,
+            "identity_number": inputs.merchant_identity_number,
+            "business_license_asset_id": business_license_asset_id,
+            "identity_front_asset_id": identity_front_asset_id,
+            "identity_back_asset_id": identity_back_asset_id,
+            "legal_entity_name": COMPLIANCE_MERCHANT_ENTITY_NAME,
+            "unified_social_credit_code": COMPLIANCE_MERCHANT_CREDIT_CODE,
+            "legal_representative": COMPLIANCE_MERCHANT_LEGAL_REPRESENTATIVE,
+            "registered_address": COMPLIANCE_MERCHANT_REGISTERED_ADDRESS,
+            "business_address": inputs.merchant_business_address
+            or COMPLIANCE_MERCHANT_REGISTERED_ADDRESS,
+            "contact_phone": inputs.merchant_contact_phone
+            or COMPLIANCE_MERCHANT_DEFAULT_CONTACT_PHONE,
+            "business_license_valid_until": inputs.merchant_license_valid_until,
+            "business_license_long_term": inputs.merchant_license_long_term,
+            "special_license_not_required": True,
+        },
+        client_ip=None,
+        user_agent="seed_mall compliance application",
+    )
+    if authorization_asset_id is not None:
+        file_transactions.attach_asset_reference(
+            db,
+            asset_id=authorization_asset_id,
+            resource_type="shop_qualification",
+            resource_id=shop.id,
+            purpose="authorization_letter",
+        )
+    print("  已提交真实商家资质，等待管理员人工预审")
+    return shop
+
+
+def _ensure_publisher_verification_application(
+    db,
+    publisher: User,
+    inputs: ComplianceApplicationInputs,
+) -> PublisherVerification | None:
+    current = _current_publisher_verification(db, publisher)
+    if current is not None:
+        return current
+    pending = (
+        db.query(PublisherVerification)
+        .filter(
+            PublisherVerification.user_id == publisher.id,
+            PublisherVerification.status == PublisherVerificationStatus.PENDING,
+        )
+        .order_by(PublisherVerification.id.desc())
+        .first()
+    )
+    if pending is not None:
+        return pending
+    if inputs.publisher_identity_front_path is None:
+        return None
+    if not auth_transactions.current_acceptance_status(db, publisher.id)[
+        "all_current_accepted"
+    ]:
+        print("  实名申请未提交：请先用账号「互动递归」登录并确认用户协议与隐私政策")
+        return None
+
+    assert inputs.publisher_identity_back_path is not None
+    assert inputs.publisher_identity_number is not None
+    front_asset_id = _ingest_compliance_asset(
+        db,
+        owner=publisher,
+        purpose="publisher_identity_front",
+        source_path=inputs.publisher_identity_front_path,
+    )
+    back_asset_id = _ingest_compliance_asset(
+        db,
+        owner=publisher,
+        purpose="publisher_identity_back",
+        source_path=inputs.publisher_identity_back_path,
+    )
+    verification = information_service.submit_verification(
+        db,
+        publisher.id,
+        {
+            "real_name": COMPLIANCE_PUBLISHER_REAL_NAME,
+            "document_type": "resident_identity_card",
+            "document_number": inputs.publisher_identity_number,
+            "document_front_asset_id": front_asset_id,
+            "document_back_asset_id": back_asset_id,
+            "document_valid_until": inputs.publisher_document_valid_until,
+            "document_long_term": inputs.publisher_document_long_term,
+        },
+    )
+    print("  已提交真实发布者实名申请，等待管理员人工审核")
+    return verification
+
+
+def _ensure_categories(
+    db, categories: list[tuple[str, str | None, int]] = CATEGORIES
+) -> dict[str, int]:
     dao = CategoryDAO(db)
     category_map: dict[str, int] = {}
 
-    for name, parent_name, sort in CATEGORIES:
+    for name, parent_name, sort in categories:
         parent_id = category_map.get(parent_name) if parent_name else None
         existing = next(
             (
@@ -1890,7 +2419,7 @@ def _ensure_categories(db) -> dict[str, int]:
     return category_map
 
 
-def _ensure_shop(db, seller: User, *, name: str, description: str) -> Shop:
+def _ensure_demo_shop(db, seller: User, *, name: str, description: str) -> Shop:
     dao = ShopDAO(db)
     shop = dao.get_by_owner(seller.id)
     if shop is None:
@@ -1937,9 +2466,7 @@ def _ensure_shop(db, seller: User, *, name: str, description: str) -> Shop:
                 id=SEED_QUALIFICATION_EVIDENCE_ASSET_ID,
                 created_by_user_id=reviewer.id,
                 storage_driver=global_config.files.storage_driver,
-                storage_key=(
-                    f"file-assets/{SEED_QUALIFICATION_EVIDENCE_ASSET_ID}.png"
-                ),
+                storage_key=(f"file-assets/{SEED_QUALIFICATION_EVIDENCE_ASSET_ID}.png"),
                 original_filename="商城演示数据资质核验占位文件.png",
                 content_type="image/png",
                 size_bytes=1,
@@ -2053,6 +2580,7 @@ def _seed_goods(
     category_map: dict[str, int],
     assets: dict[str, list[str]],
     goods: list[GoodsSeed],
+    seed_sales: bool = True,
 ) -> list[Goods]:
     principal = _principal_for_seller(
         seller, username=seller.username, email=seller.email
@@ -2072,7 +2600,10 @@ def _seed_goods(
             action = "更新"
 
         goods_obj.status = GoodsStatus.ON
-        goods_obj.sales = max(goods_obj.sales, index * 37)
+        if seed_sales:
+            goods_obj.sales = max(goods_obj.sales, index * 37)
+        else:
+            goods_obj.sales = 0
         seeded_goods.append(goods_obj)
         seeded_goods_ids.add(goods_obj.id)
         print(f"  商品已{action}：{goods_obj.name}（{len(payload['images'])} 张图片）")
@@ -2177,6 +2708,334 @@ def _seed_information_posts(db) -> None:
     print(f"  信息发布已创建 {created_count} 条、更新 {updated_count} 条演示记录")
 
 
+def _current_publisher_verification(
+    db, publisher: User
+) -> PublisherVerification | None:
+    rows = (
+        db.query(PublisherVerification)
+        .filter(PublisherVerification.user_id == publisher.id)
+        .order_by(
+            PublisherVerification.submitted_at.desc(),
+            PublisherVerification.id.desc(),
+        )
+        .all()
+    )
+    return next(
+        (
+            row
+            for row in rows
+            if information_service.is_verification_currently_valid(row)
+        ),
+        None,
+    )
+
+
+def _ensure_compliance_information_posts(
+    db, publisher: User
+) -> list[InformationPost]:
+    verification = _current_publisher_verification(db, publisher)
+    if verification is None:
+        print(
+            "  信息发布暂未创建：请先用账号「互动递归」提交实名材料，"
+            "并由管理员在后台审核通过"
+        )
+        return []
+
+    posts: list[InformationPost] = []
+    created_count = 0
+    updated_count = 0
+    for item in _compliance_information_catalog():
+        post = (
+            db.query(InformationPost)
+            .filter(
+                InformationPost.title == item["title"],
+                InformationPost.poster_user_id == publisher.id,
+            )
+            .first()
+        )
+        if post is None:
+            post = InformationPostDAO(db).create(
+                title=item["title"],
+                category=item["category"],
+                content=item["content"],
+                contact_name=item["contact_name"],
+                contact_phone=item["contact_phone"],
+                poster_user_id=publisher.id,
+                price=item["price"],
+                attributes=item["attributes"],
+                publisher_verification_id=verification.id,
+            )
+            created_count += 1
+        else:
+            post.category = item["category"]
+            post.price = item["price"]
+            post.content = item["content"]
+            post.contact_name = item["contact_name"]
+            post.contact_phone = item["contact_phone"]
+            post.attributes = item["attributes"]
+            post.publisher_verification_id = verification.id
+            updated_count += 1
+        posts.append(post)
+    db.flush()
+    print(
+        f"  信息发布已创建 {created_count} 条、更新 {updated_count} 条；"
+        "全部保留为独立信息"
+    )
+    return posts
+
+
+def _ensure_compliance_buyer(db) -> User:
+    return _ensure_user(
+        db,
+        username=BUYER_USERNAME,
+        password=BUYER_PASSWORD,
+        email=BUYER_EMAIL,
+        phone=BUYER_PHONE,
+        role="user",
+        display_name="整改测试买家",
+    )
+
+
+def _accept_current_documents_for_seeded_user(db, user: User) -> None:
+    status = auth_transactions.current_acceptance_status(db, user.id)
+    if status["all_current_accepted"]:
+        return
+    auth_transactions.record_user_acceptances(
+        db,
+        user_id=user.id,
+        user_agreement_version=status["user_agreement_version"],
+        privacy_policy_version=status["privacy_policy_version"],
+        client_ip=None,
+        user_agent="seed_mall compliance setup (operator confirmed)",
+    )
+    print(f"  账号「{user.username}」已确认当前用户协议与隐私政策")
+
+
+def _compliance_seed_reviewer(db) -> User:
+    reviewer = next(
+        (
+            user
+            for user in UserDAO(db).list_all()
+            if user.role in {UserRole.ADMIN, UserRole.SUPER_ADMIN}
+        ),
+        None,
+    )
+    if reviewer is None:
+        raise RuntimeError("缺少管理员账号，无法完成整改 Seed 审核流程")
+    return reviewer
+
+
+def _complete_seeded_publisher_verification(
+    db, publisher: User, *, reviewer: User
+) -> PublisherVerification | None:
+    verification = _current_publisher_verification(db, publisher)
+    if verification is not None:
+        return verification
+    verification = (
+        db.query(PublisherVerification)
+        .filter(
+            PublisherVerification.user_id == publisher.id,
+            PublisherVerification.status == PublisherVerificationStatus.PENDING,
+        )
+        .order_by(
+            PublisherVerification.submitted_at.desc(),
+            PublisherVerification.id.desc(),
+        )
+        .first()
+    )
+    if verification is None:
+        return None
+    information_service.review_verification(
+        db,
+        verification.id,
+        approved=True,
+        reject_reason=None,
+        reviewer_user_id=reviewer.id,
+    )
+    print("  已自动通过发布者实名认证")
+    return verification
+
+
+def _complete_seeded_shop_onboarding(
+    db,
+    merchant: User,
+    inputs: ComplianceApplicationInputs,
+    *,
+    reviewer: User,
+) -> Shop | None:
+    shop = ShopDAO(db).get_by_owner(merchant.id)
+    if shop is None:
+        return None
+    if shop.onboarding_stage == ShopOnboardingStage.QUALIFICATION_SUBMITTED.value:
+        if inputs.merchant_business_license_path is None:
+            print("  商家自动审核尚未完成：请带营业执照参数重新运行 Seed")
+            return shop
+        evidence_asset_id = _ingest_compliance_asset(
+            db,
+            owner=reviewer,
+            purpose="merchant_registry_review_evidence",
+            source_path=inputs.merchant_business_license_path,
+        )
+        service.admin_review_shop(
+            db,
+            shop.id,
+            payload={
+                "approved": True,
+                "evidence_asset_id": evidence_asset_id,
+                "verification_source": "整改 Seed：平台负责人已确认企业登记及资质信息",
+                "registration_status": "存续",
+                "entity_name_matches": True,
+                "credit_code_matches": True,
+                "legal_representative_matches": True,
+                "registration_status_valid": True,
+                "registered_address_matches": True,
+                "business_scope_matches": True,
+                "special_license_scope_allowed": True,
+                "note": "平台负责人执行整改 Seed，并确认该商家资质审核通过。",
+                "reject_reason": None,
+            },
+            handler_user_id=reviewer.id,
+        )
+        print("  已自动通过商家资质预审并生成电子协议")
+
+    if shop.onboarding_stage == ShopOnboardingStage.AGREEMENT_GENERATED.value:
+        agreement = service.admin_get_shop_agreement(db, shop.id)
+        service.merchant_accept_shop_agreement(
+            db,
+            _principal_for_seller(
+                merchant,
+                username=merchant.username,
+                email=merchant.email,
+            ),
+            {
+                "agreement_number": agreement.agreement_number,
+                "document_version": agreement.document_version,
+                "draft_content_sha256": agreement.draft_content_sha256,
+                "confirmed": True,
+            },
+            client_ip=None,
+            user_agent="seed_mall compliance workflow (operator confirmed)",
+        )
+        print("  已自动完成商家电子协议签署与归档")
+
+    if shop.onboarding_stage == ShopOnboardingStage.AGREEMENT_ARCHIVED.value:
+        service.admin_approve_shop(db, shop.id)
+        print("  已自动完成商家最终审核并开通店铺")
+    return shop
+
+
+def _seed_compliance(
+    db,
+    *,
+    assets: dict[str, list[str]],
+    application_inputs: ComplianceApplicationInputs | None = None,
+    auto_complete_compliance_workflow: bool = True,
+) -> None:
+    category_map = _ensure_categories(db, COMPLIANCE_CATEGORIES)
+    _ensure_compliance_buyer(db)
+    merchant = _ensure_user(
+        db,
+        username=COMPLIANCE_MERCHANT_USERNAME,
+        password=COMPLIANCE_MERCHANT_PASSWORD,
+        email=COMPLIANCE_MERCHANT_EMAIL,
+        phone=None,
+        role="user",
+        display_name=COMPLIANCE_MERCHANT_NAME,
+    )
+    publisher = _ensure_user(
+        db,
+        username=COMPLIANCE_PUBLISHER_USERNAME,
+        password=COMPLIANCE_PUBLISHER_PASSWORD,
+        email=COMPLIANCE_PUBLISHER_EMAIL,
+        phone=COMPLIANCE_PUBLISHER_PHONE,
+        role="user",
+        display_name=COMPLIANCE_PUBLISHER_REAL_NAME,
+    )
+
+    inputs = application_inputs or ComplianceApplicationInputs()
+    if auto_complete_compliance_workflow:
+        if inputs.merchant_business_license_path is not None:
+            _accept_current_documents_for_seeded_user(db, merchant)
+        if inputs.publisher_identity_front_path is not None:
+            _accept_current_documents_for_seeded_user(db, publisher)
+    _ensure_compliance_shop_application(db, merchant, inputs)
+    _ensure_publisher_verification_application(db, publisher, inputs)
+
+    reviewer = None
+    if auto_complete_compliance_workflow and (
+        ShopDAO(db).get_by_owner(merchant.id) is not None
+        or db.query(PublisherVerification)
+        .filter(PublisherVerification.user_id == publisher.id)
+        .first()
+        is not None
+    ):
+        reviewer = _compliance_seed_reviewer(db)
+        _complete_seeded_publisher_verification(
+            db,
+            publisher,
+            reviewer=reviewer,
+        )
+        _complete_seeded_shop_onboarding(
+            db,
+            merchant,
+            inputs,
+            reviewer=reviewer,
+        )
+
+    shop = ShopDAO(db).get_by_owner(merchant.id)
+    goods_list: list[Goods] = []
+    if shop is None:
+        print(
+            "  商家商品暂未创建：请先用账号「hddg」提交真实企业资质，"
+            "完成平台预审、在线签约和最终审核"
+        )
+    elif not service.is_shop_operational(shop):
+        print(
+            f"  店铺「{shop.name}」尚未完成最终审核，暂不上架商品；"
+            f"当前阶段：{shop.onboarding_stage}"
+        )
+    else:
+        shop.name = COMPLIANCE_SHOP_NAME
+        shop.description = COMPLIANCE_SHOP_DESCRIPTION
+        shop.avatar = "/mall/shop-avatar.svg"
+        goods_list = _seed_goods(
+            db,
+            seller=merchant,
+            shop_id=shop.id,
+            category_map=category_map,
+            assets={**COMPLIANCE_ASSET_URLS, **assets},
+            goods=_compliance_goods_catalog(),
+            seed_sales=False,
+        )
+        print(f"  店铺「{shop.name}」已就绪：{len(goods_list)} 个真实服务商品")
+
+    posts = _ensure_compliance_information_posts(db, publisher)
+    posts_requiring_review = [
+        post for post in posts if post.status != InformationStatus.APPROVED
+    ]
+    if auto_complete_compliance_workflow and posts_requiring_review:
+        reviewer = reviewer or _compliance_seed_reviewer(db)
+        for post in posts_requiring_review:
+            information_service.admin_review(
+                db,
+                post.id,
+                approved=True,
+                reject_reason=None,
+                reviewer_user_id=reviewer.id,
+            )
+        print(f"  已自动通过 {len(posts_requiring_review)} 条信息发布审核")
+    print("整改取证种子数据已准备。")
+    print("  商家账号：hddg（密码仅在首次创建账号时设置）")
+    print("  发布者账号：互动递归（密码仅在首次创建账号时设置）")
+    print("  普通测试账号：buyer（密码仅在首次创建账号时设置）")
+    print(f"  已上架商品：{len(goods_list)}")
+    print(f"  已准备信息发布：{len(posts)}")
+    if auto_complete_compliance_workflow:
+        print("  已按 Seed 确认自动执行可完成的审核、签约、开店及信息发布流程")
+    else:
+        print("  审核、签约、最终开店及信息发布审核必须在网站后台人工完成")
+
+
 def _seed_evaluations(
     db,
     *,
@@ -2273,7 +3132,7 @@ def _seed_evaluations(
     print(f"  已创建 {created_count} 条演示评价")
 
 
-def _seed(db, *, assets: dict[str, list[str]]) -> None:
+def _seed_demo(db, *, assets: dict[str, list[str]]) -> None:
     category_map = _ensure_categories(db)
     buyer = _ensure_buyer(db)
 
@@ -2286,7 +3145,7 @@ def _seed(db, *, assets: dict[str, list[str]]) -> None:
             phone=shop_cfg["phone"],
             role="user",
         )
-        shop = _ensure_shop(
+        shop = _ensure_demo_shop(
             db, seller, name=shop_cfg["name"], description=shop_cfg["description"]
         )
         shop_goods = [
@@ -2323,6 +3182,19 @@ def _seed(db, *, assets: dict[str, list[str]]) -> None:
 
 
 def _reset(db) -> None:
+    db.execute(
+        text(
+            "UPDATE mall_shops SET current_agreement_id = NULL, "
+            "last_qualification_review_id = NULL"
+        )
+    )
+    db.execute(
+        text(
+            "DELETE FROM file_asset_references "
+            "WHERE resource_type IN "
+            "('shop_agreement', 'shop_qualification', 'shop_qualification_review')"
+        )
+    )
     tables = [
         "information_posts",
         "mall_chat_messages",
@@ -2343,6 +3215,8 @@ def _reset(db) -> None:
         "mall_goods_skus",
         "mall_goods",
         "mall_wallets",
+        "shop_agreements",
+        "shop_qualification_reviews",
         "mall_shops",
         "mall_categories",
     ]
@@ -2351,15 +3225,206 @@ def _reset(db) -> None:
     print("已清空商城数据。")
 
 
+def _iso_date(value: str) -> date:
+    try:
+        return date.fromisoformat(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("日期必须使用 YYYY-MM-DD 格式") from exc
+
+
+def _masked_input_from_terminal(terminal: TextIO, prompt: str) -> str:
+    descriptor = terminal.fileno()
+    original_attributes = termios.tcgetattr(descriptor)
+    masked_attributes = list(original_attributes)
+    masked_attributes[6] = list(original_attributes[6])
+    masked_attributes[3] &= ~(termios.ECHO | termios.ICANON)
+    masked_attributes[6][termios.VMIN] = 1
+    masked_attributes[6][termios.VTIME] = 0
+    characters: list[str] = []
+
+    terminal.write(prompt)
+    terminal.flush()
+    termios.tcsetattr(descriptor, termios.TCSAFLUSH, masked_attributes)
+    try:
+        while True:
+            character = terminal.read(1)
+            if character in {"\r", "\n"}:
+                break
+            if character in {"\b", "\x7f"}:
+                if characters:
+                    characters.pop()
+                    terminal.write("\b \b")
+                    terminal.flush()
+                continue
+            if character == "\x04":
+                if not characters:
+                    raise EOFError
+                break
+            if not character or ord(character) < 32:
+                continue
+            characters.append(character)
+            terminal.write("*")
+            terminal.flush()
+    finally:
+        termios.tcsetattr(descriptor, termios.TCSADRAIN, original_attributes)
+        terminal.write("\n")
+        terminal.flush()
+    return "".join(characters)
+
+
+def _masked_input(prompt: str) -> str:
+    try:
+        with Path("/dev/tty").open("r+", encoding="utf-8") as terminal:
+            return _masked_input_from_terminal(terminal, prompt)
+    except (OSError, termios.error):
+        return getpass.getpass(prompt)
+
+
+def _application_inputs_from_args(
+    args: argparse.Namespace,
+) -> ComplianceApplicationInputs:
+    merchant_paths = (
+        args.merchant_business_license,
+        args.merchant_id_front,
+        args.merchant_id_back,
+    )
+    merchant_requested = any(path is not None for path in merchant_paths)
+    if merchant_requested and not all(path is not None for path in merchant_paths):
+        raise SystemExit("提交商家资质时必须同时提供营业执照和负责人身份证正反面")
+    if merchant_requested and not args.merchant_applicant_name:
+        raise SystemExit("提交商家资质时必须提供 --merchant-applicant-name")
+    if args.merchant_authorization is not None and not merchant_requested:
+        raise SystemExit("授权委托书必须与完整商家资质材料一起提交")
+    if (
+        merchant_requested
+        and args.merchant_applicant_name != COMPLIANCE_MERCHANT_LEGAL_REPRESENTATIVE
+        and args.merchant_authorization is None
+    ):
+        raise SystemExit(
+            "商家负责人不是营业执照法定代表人时，必须提供 --merchant-authorization"
+        )
+    if merchant_requested and not (
+        args.merchant_license_long_term or args.merchant_license_valid_until
+    ):
+        raise SystemExit(
+            "请提供 --merchant-license-valid-until，或确认 --merchant-license-long-term"
+        )
+
+    publisher_paths = (args.publisher_id_front, args.publisher_id_back)
+    publisher_requested = any(path is not None for path in publisher_paths)
+    if publisher_requested and not all(path is not None for path in publisher_paths):
+        raise SystemExit("提交发布者实名时必须同时提供身份证正反面")
+    if publisher_requested and not (
+        args.publisher_id_long_term or args.publisher_id_valid_until
+    ):
+        raise SystemExit(
+            "请提供 --publisher-id-valid-until，或确认 --publisher-id-long-term"
+        )
+
+    merchant_identity_number = None
+    if merchant_requested:
+        merchant_identity_number = os.getenv("MALL_SEED_MERCHANT_ID_NUMBER")
+        if not merchant_identity_number:
+            merchant_identity_number = _masked_input(
+                "商家负责人身份证号码（输入以 * 显示）："
+            ).strip()
+        if not merchant_identity_number:
+            raise SystemExit("商家负责人身份证号码不能为空")
+
+    publisher_identity_number = None
+    if publisher_requested:
+        publisher_identity_number = os.getenv("MALL_SEED_PUBLISHER_ID_NUMBER")
+        if not publisher_identity_number:
+            publisher_identity_number = _masked_input(
+                "信息发布者身份证号码（输入以 * 显示）："
+            ).strip()
+        if not publisher_identity_number:
+            raise SystemExit("信息发布者身份证号码不能为空")
+
+    return ComplianceApplicationInputs(
+        merchant_business_license_path=args.merchant_business_license,
+        merchant_identity_front_path=args.merchant_id_front,
+        merchant_identity_back_path=args.merchant_id_back,
+        merchant_authorization_path=args.merchant_authorization,
+        merchant_identity_number=merchant_identity_number,
+        merchant_applicant_name=args.merchant_applicant_name,
+        merchant_business_address=args.merchant_business_address,
+        merchant_contact_phone=args.merchant_contact_phone,
+        merchant_license_valid_until=args.merchant_license_valid_until,
+        merchant_license_long_term=args.merchant_license_long_term,
+        publisher_identity_front_path=args.publisher_id_front,
+        publisher_identity_back_path=args.publisher_id_back,
+        publisher_identity_number=publisher_identity_number,
+        publisher_document_valid_until=args.publisher_id_valid_until,
+        publisher_document_long_term=args.publisher_id_long_term,
+    )
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="商城演示数据")
+    parser = argparse.ArgumentParser(description="商城种子数据")
+    parser.add_argument(
+        "--profile",
+        choices=("compliance", "demo"),
+        default="compliance",
+        help="compliance 准备整改取证数据；demo 生成开发演示数据",
+    )
     parser.add_argument("--reset", action="store_true", help="先清空商城数据再填充")
+    parser.add_argument(
+        "--confirm-production",
+        default="",
+        metavar="DOMAIN",
+        help="生产环境必须明确填写目标域名；当前仅接受 hemu.site",
+    )
+    parser.add_argument(
+        "--auto-accept-current-legal-documents",
+        action="store_true",
+        help=(
+            "兼容旧调用；整改 Seed 传入真实材料后已默认自动确认协议并完成流程"
+        ),
+    )
+    parser.add_argument("--merchant-business-license", type=Path)
+    parser.add_argument("--merchant-id-front", type=Path)
+    parser.add_argument("--merchant-id-back", type=Path)
+    parser.add_argument("--merchant-authorization", type=Path)
+    parser.add_argument("--merchant-applicant-name")
+    parser.add_argument(
+        "--merchant-business-address",
+        default=COMPLIANCE_MERCHANT_REGISTERED_ADDRESS,
+    )
+    parser.add_argument(
+        "--merchant-contact-phone",
+        default=COMPLIANCE_MERCHANT_DEFAULT_CONTACT_PHONE,
+    )
+    merchant_validity = parser.add_mutually_exclusive_group()
+    merchant_validity.add_argument("--merchant-license-valid-until", type=_iso_date)
+    merchant_validity.add_argument("--merchant-license-long-term", action="store_true")
+    parser.add_argument("--publisher-id-front", type=Path)
+    parser.add_argument("--publisher-id-back", type=Path)
+    publisher_validity = parser.add_mutually_exclusive_group()
+    publisher_validity.add_argument("--publisher-id-valid-until", type=_iso_date)
+    publisher_validity.add_argument("--publisher-id-long-term", action="store_true")
     args = parser.parse_args()
+
+    is_development = global_config.app.env in {"dev", "test"}
+    if args.profile == "demo" and not is_development:
+        raise SystemExit("商城演示数据仅允许在 dev/test 环境运行")
+    if not is_development and args.confirm_production != "hemu.site":
+        raise SystemExit(
+            "生产环境运行整改种子前必须添加 --confirm-production hemu.site"
+        )
+    application_inputs = _application_inputs_from_args(args)
 
     def _job(db) -> None:
         if args.reset:
             _reset(db)
-        _seed(db, assets=ASSET_URLS)
+        if args.profile == "demo":
+            _seed_demo(db, assets=ASSET_URLS)
+        else:
+            _seed_compliance(
+                db,
+                assets={},
+                application_inputs=application_inputs,
+            )
 
     run_in_new_session(_job)
 
