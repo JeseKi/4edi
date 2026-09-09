@@ -957,6 +957,14 @@ COMPLIANCE_CATEGORIES = [
     ("软件开发", "企业服务", 2),
 ]
 
+# 整改站点只保留一个经真实资质核验的商家主体。原商城目录中的普通类目和商品
+# 继续保留，但统一归到商家 A；食品等需要专项许可的类目仍不对外开放。
+MERCHANT_A_CATEGORIES = [
+    category
+    for category in CATEGORIES
+    if category[0] not in RESTRICTED_CATEGORY_NAMES
+] + COMPLIANCE_CATEGORIES
+
 COMPLIANCE_WEBSITE_IMAGE_URL = (
     "https://tuchuang.s3.fstc.kispace.cn/1/"
     "object_def9376fb2ae46608b669a3b15672f4f_18-website-delivery.webp"
@@ -1141,7 +1149,7 @@ COMPLIANCE_MERCHANT_ENTITY_NAME = "杭州互动递归科技有限公司"
 COMPLIANCE_MERCHANT_CREDIT_CODE = "91330108MAKCCCHP50"
 COMPLIANCE_MERCHANT_LEGAL_REPRESENTATIVE = "周子轩"
 COMPLIANCE_MERCHANT_REGISTERED_ADDRESS = (
-    "浙江省杭州市滨江区浦沿街道清昀街422号2号楼2层0772室"
+    "浙江省杭州市滨江区浦沿街道清旷街422号2号楼2层0772室"
 )
 COMPLIANCE_MERCHANT_DEFAULT_CONTACT_PHONE = "19935644212"
 COMPLIANCE_PUBLISHER_USERNAME = "互动递归"
@@ -2036,6 +2044,14 @@ def _compliance_goods_catalog() -> list[GoodsSeed]:
             }
         )
     return goods
+
+
+def _merchant_a_goods_catalog() -> list[GoodsSeed]:
+    """商家 A 的完整目录：整改服务商品及原商城普通商品。"""
+    legacy_goods = [
+        item for item in GOODS if item["category"] not in RESTRICTED_CATEGORY_NAMES
+    ]
+    return [*_compliance_goods_catalog(), *legacy_goods]
 
 
 # 演示店铺配置：每个店铺由独立卖家账号持有（后端约束「一用户一家店」）。
@@ -3006,7 +3022,7 @@ def _seed_compliance(
     application_inputs: ComplianceApplicationInputs | None = None,
     auto_complete_compliance_workflow: bool = True,
 ) -> None:
-    category_map = _ensure_categories(db, COMPLIANCE_CATEGORIES)
+    category_map = _ensure_categories(db, MERCHANT_A_CATEGORIES)
     _ensure_compliance_buyer(db)
     merchant = _ensure_user(
         db,
@@ -3078,11 +3094,14 @@ def _seed_compliance(
             seller=merchant,
             shop_id=shop.id,
             category_map=category_map,
-            assets={**COMPLIANCE_ASSET_URLS, **assets},
-            goods=_compliance_goods_catalog(),
+            assets={**ASSET_URLS, **COMPLIANCE_ASSET_URLS, **assets},
+            goods=_merchant_a_goods_catalog(),
             seed_sales=False,
         )
-        print(f"  店铺「{shop.name}」已就绪：{len(goods_list)} 个真实服务商品")
+        print(
+            f"  店铺「{shop.name}」已就绪：{len(goods_list)} 个在售商品"
+            "（含原商城普通商品）"
+        )
 
     posts = _ensure_compliance_information_posts(db, publisher)
     posts_requiring_review = [

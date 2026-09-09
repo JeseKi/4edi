@@ -218,13 +218,20 @@ def test_compliance_seed_adds_zero_sales_content_after_manual_approval(
     )
 
     goods = test_db_session.query(Goods).all()
-    assert len(goods) == 17
+    assert len(goods) == 48
     assert {
         "响应式企业官网建设服务",
         "小程序定制开发服务",
         "杭州本地餐饮小程序开发，支持点餐、会员和配送",
         "行业协会信息门户与会员管理系统建设",
+        "AirTone Pro 真无线蓝牙耳机 主动降噪 30H 续航",
+        "FixMate 精密螺丝刀套装 24 合 1 磁吸收纳盒",
     }.issubset({item.name for item in goods})
+    assert "每日坚果混合装 25g×20 袋 原味独立包装" not in {
+        item.name for item in goods
+    }
+    shop = test_db_session.query(Shop).one()
+    assert all(item.shop_id == shop.id for item in goods)
     assert all(item.sales == 0 for item in goods)
     posts = test_db_session.query(InformationPost).all()
     assert len(posts) == 20
@@ -240,7 +247,7 @@ def test_compliance_seed_adds_zero_sales_content_after_manual_approval(
 
     seed_mall._seed_compliance(test_db_session, assets={})
 
-    assert test_db_session.query(Goods).count() == 17
+    assert test_db_session.query(Goods).count() == 48
     assert test_db_session.query(InformationPost).count() == 20
     assert all(
         post.status == InformationStatus.APPROVED
@@ -311,13 +318,26 @@ def test_compliance_runtime_inputs_complete_workflow_and_public_content(
     assert verification.reviewer_user_id is not None
     assert test_db_session.query(FileAsset).count() == 6
     goods = test_db_session.query(Goods).all()
-    assert len(goods) == 17
+    assert len(goods) == 48
     assert all(item.sales == 0 for item in goods)
-    assert all(len(item.images) == 2 for item in goods)
-    assert len({item.main_image for item in goods}) == 17
+    assert all(item.shop_id == shop.id for item in goods)
+    compliance_goods_names = {
+        item["name"] for item in seed_mall._compliance_goods_catalog()
+    }
+    compliance_goods = [item for item in goods if item.name in compliance_goods_names]
+    legacy_goods = [item for item in goods if item.name not in compliance_goods_names]
+    assert len(compliance_goods) == 17
+    assert len(legacy_goods) == 31
+    assert all(len(item.images) == 2 for item in compliance_goods)
+    assert all(len(item.images) == 1 for item in legacy_goods)
+    assert len({item.main_image for item in compliance_goods}) == 17
     assert all(
         item.main_image.startswith("https://tuchuang.s3.fstc.kispace.cn/")
-        for item in goods
+        for item in compliance_goods
+    )
+    assert all(
+        item.main_image.startswith("https://fstc.kispace.cn/i/")
+        for item in legacy_goods
     )
     assert all(
         all(image.endswith(".webp") for image in item.images) for item in goods
@@ -355,6 +375,6 @@ def test_compliance_runtime_inputs_complete_workflow_and_public_content(
     assert test_db_session.query(ShopAgreement).count() == 1
     assert test_db_session.query(FileAsset).count() == 6
     assert test_db_session.query(LegalAcceptance).count() == 5
-    assert test_db_session.query(Goods).count() == 17
+    assert test_db_session.query(Goods).count() == 48
     assert test_db_session.query(InformationPost).count() == 20
     assert test_db_session.query(AuditEvent).count() == 24
