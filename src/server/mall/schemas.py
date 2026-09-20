@@ -226,6 +226,8 @@ class ShopAdminDetailOut(BaseModel):
 
 class ComplianceSummaryOut(BaseModel):
     pending_publisher_verifications: int
+    pending_information_posts: int
+    overdue_information_posts: int
     pending_shops: int
     qualification_expiring_soon: int
     qualification_expired: int

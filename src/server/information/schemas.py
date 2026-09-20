@@ -158,3 +158,10 @@ class PublisherVerificationPageOut(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class PublisherVerificationEvidenceOut(BaseModel):
+    """监管取证视角的实名记录与关联信息。"""
+
+    verification: PublisherVerificationOut
+    posts: list[PostAdminListOut]

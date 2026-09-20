@@ -386,6 +386,8 @@ def admin_shop_detail(
 
 def compliance_summary(db: Session) -> dict[str, int]:
     from src.server.information.models import (
+        InformationPost,
+        InformationStatus,
         PublisherVerification,
         PublisherVerificationStatus,
     )
@@ -395,6 +397,15 @@ def compliance_summary(db: Session) -> dict[str, int]:
     return {
         "pending_publisher_verifications": db.query(PublisherVerification)
         .filter(PublisherVerification.status == PublisherVerificationStatus.PENDING)
+        .count(),
+        "pending_information_posts": db.query(InformationPost)
+        .filter(InformationPost.status == InformationStatus.PENDING)
+        .count(),
+        "overdue_information_posts": db.query(InformationPost)
+        .filter(
+            InformationPost.status == InformationStatus.PENDING,
+            InformationPost.created_at <= now - timedelta(hours=24),
+        )
         .count(),
         "pending_shops": db.query(Shop)
         .filter(Shop.status == ShopStatus.PENDING)

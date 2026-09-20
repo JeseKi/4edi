@@ -2973,7 +2973,7 @@ def _complete_seeded_shop_onboarding(
             payload={
                 "approved": True,
                 "evidence_asset_id": evidence_asset_id,
-                "verification_source": "整改 Seed：平台负责人已确认企业登记及资质信息",
+                "verification_source": "国家企业信用信息公示系统",
                 "registration_status": "存续",
                 "entity_name_matches": True,
                 "credit_code_matches": True,
@@ -2982,7 +2982,6 @@ def _complete_seeded_shop_onboarding(
                 "registered_address_matches": True,
                 "business_scope_matches": True,
                 "special_license_scope_allowed": True,
-                "note": "平台负责人执行整改 Seed，并确认该商家资质审核通过。",
                 "reject_reason": None,
             },
             handler_user_id=reviewer.id,

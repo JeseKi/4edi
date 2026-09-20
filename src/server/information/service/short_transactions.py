@@ -536,6 +536,45 @@ def get_verification_payload(db: Session, verification_id: int) -> dict:
     )
 
 
+def get_verification_evidence(db: Session, verification_id: int) -> dict:
+    """返回一条实名记录及所有绑定的信息发布记录，供监管取证页面使用。"""
+
+    verification = db.get(PublisherVerification, verification_id)
+    if verification is None:
+        raise HTTPException(status_code=404, detail="实名申请不存在")
+
+    posts = (
+        db.query(InformationPost)
+        .filter(InformationPost.publisher_verification_id == verification_id)
+        .order_by(InformationPost.created_at.desc(), InformationPost.id.desc())
+        .all()
+    )
+    usernames = _usernames(
+        db,
+        {verification.user_id}
+        | {post.poster_user_id for post in posts}
+        | ({verification.reviewer_user_id} if verification.reviewer_user_id else set()),
+    )
+    verification_data = verification_payload(
+        verification,
+        username=usernames.get(verification.user_id, "用户"),
+        reviewer_username=(
+            usernames.get(verification.reviewer_user_id)
+            if verification.reviewer_user_id is not None
+            else None
+        ),
+    )
+    post_data = [
+        admin_item_payload(
+            post,
+            usernames.get(post.poster_user_id, "用户"),
+            verification,
+        )
+        for post in posts
+    ]
+    return {"verification": verification_data, "posts": post_data}
+
+
 def review_verification(
     db: Session,
     verification_id: int,

@@ -7,6 +7,7 @@ import type {
   InformationPage,
   InformationPostDetail,
   PublisherVerification,
+  PublisherVerificationEvidence,
   PublisherVerificationStatus,
 } from './types'
 
@@ -136,3 +137,8 @@ export const adminReviewPublisherVerification = async (
   payload: { approved: boolean; reject_reason?: string },
 ): Promise<PublisherVerification> =>
   (await api.post(`/information/admin/verifications/${verificationId}/review`, payload)).data
+
+export const adminGetPublisherVerificationEvidence = async (
+  verificationId: number,
+): Promise<PublisherVerificationEvidence> =>
+  (await api.get(`/information/admin/verifications/${verificationId}`)).data

@@ -115,8 +115,12 @@ def _mall_routers() -> tuple[APIRouter, ...]:
 
 def _information_routers() -> tuple[APIRouter, ...]:
     from src.server.information.router import admin_router, router
+    from src.server.regulatory_evidence.router import (
+        admin_router as evidence_admin_router,
+        public_router as evidence_public_router,
+    )
 
-    return (router, admin_router)
+    return (router, admin_router, evidence_admin_router, evidence_public_router)
 
 
 def _complaint_router() -> APIRouter:

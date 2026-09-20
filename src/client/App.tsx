@@ -40,6 +40,7 @@ import PublisherVerificationPage from './pages/mall/information/PublisherVerific
 import ComplaintPage from './pages/mall/ComplaintPage'
 import InformationAdminPage from './pages/mall/admin/InformationAdminPage'
 import PublisherVerificationAdminPage from './pages/mall/admin/PublisherVerificationAdminPage'
+import PublisherVerificationEvidencePage from './pages/mall/admin/PublisherVerificationEvidencePage'
 import SellerLayout from './components/mall/SellerLayout'
 import ShopManagePage from './pages/mall/seller/ShopManagePage'
 import ShopAgreementPrintPage from './pages/mall/seller/ShopAgreementPrintPage'
@@ -51,6 +52,8 @@ import CouponManagePage from './pages/mall/seller/CouponManagePage'
 import WalletPage from './pages/mall/seller/WalletPage'
 import SellerChatPage from './pages/mall/seller/SellerChatPage'
 import ShopReviewPage from './pages/mall/admin/ShopReviewPage'
+import ShopQualificationEvidencePage from './pages/mall/admin/ShopQualificationEvidencePage'
+import RegulatoryEvidencePage from './pages/mall/RegulatoryEvidencePage'
 import WithdrawReviewPage from './pages/mall/admin/WithdrawReviewPage'
 import CouponAdminPage from './pages/mall/admin/CouponAdminPage'
 import { AuthProvider, RequireAdmin, RequireAuth } from './providers/AuthProvider'
@@ -84,6 +87,7 @@ function AppRoutes() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/legal/:documentKey" element={<LegalDocumentPage />} />
+        <Route path="/regulatory-evidence" element={<RegulatoryEvidencePage />} />
         <Route path="/reset-password/:token" element={<ResetPasswordPage />} />
         <Route path="/profile/password-change/:token" element={<ConfirmPasswordChangePage />} />
         {hasFeature('oauth-provider') && (
@@ -161,6 +165,9 @@ function AppRoutes() {
           <Route path="/mall/admin/shops/:shopId/agreement/print" element={<RequireAdmin><ShopAgreementPrintPage /></RequireAdmin>} />
         )}
         {hasFeature('mall') && (
+          <Route path="/mall/admin/shops/:shopId/evidence" element={<RequireAdmin><ShopQualificationEvidencePage /></RequireAdmin>} />
+        )}
+        {hasFeature('mall') && (
           <Route path="/mall/admin/withdrawals" element={<RequireAdmin><WithdrawReviewPage /></RequireAdmin>} />
         )}
         {hasFeature('mall') && (
@@ -171,6 +178,9 @@ function AppRoutes() {
         )}
         {hasFeature('information') && (
           <Route path="/mall/admin/publisher-verifications" element={<RequireAdmin><PublisherVerificationAdminPage /></RequireAdmin>} />
+        )}
+        {hasFeature('information') && (
+          <Route path="/mall/admin/publisher-verifications/:verificationId/evidence" element={<RequireAdmin><PublisherVerificationEvidencePage /></RequireAdmin>} />
         )}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

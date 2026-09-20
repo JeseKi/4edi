@@ -142,6 +142,7 @@ def test_database_template(tmp_path_factory: pytest.TempPathFactory) -> Path:
     import src.server.mall.models  # noqa: F401
     import src.server.information.models  # noqa: F401
     import src.server.complaint.models  # noqa: F401
+    import src.server.regulatory_evidence.models  # noqa: F401
 
     try:
         Base.metadata.create_all(bind=engine)

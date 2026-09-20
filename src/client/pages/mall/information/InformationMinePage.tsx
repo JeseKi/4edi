@@ -102,6 +102,16 @@ export default function InformationMinePage() {
                         驳回原因：{item.reject_reason}
                       </div>
                     )}
+                    {item.status === 'pending' && (
+                      <div className="text-xs mt-2" style={{ color: '#ad6800' }}>
+                        平台将在 1 个工作日内完成审核，请留意审核结果。
+                      </div>
+                    )}
+                    {item.reviewed_at && item.status !== 'pending' && (
+                      <div className="text-xs mt-2" style={{ color: '#777' }}>
+                        审核时间：{dayjs(item.reviewed_at).format('YYYY-MM-DD HH:mm')}
+                      </div>
+                    )}
                     {item.status === 'approved' && (
                       <div className="mt-2">
                         <Link

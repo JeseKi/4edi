@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
+import { Link } from 'react-router-dom'
 import { App, Button, Checkbox, Descriptions, Form, Image, Input, Modal, Popconfirm, Space, Table, Tabs, Tag } from 'antd'
 import {
   approveAdminShop,
@@ -14,6 +15,7 @@ import api from '../../../lib/api'
 import { resolveApiErrorMessage } from '../../../lib/error'
 import type { FileAsset, MallShop, MallShopStatus, ShopOnboardingStage } from '../../../lib/types'
 import FileUpload from '../../../components/files/FileUpload'
+import ComplianceAdminLayout from '../../../components/mall/ComplianceAdminLayout'
 
 const STATUS_LABELS: Record<string, { text: string; color: string }> = {
   pending: { text: '入驻处理中', color: 'orange' },
@@ -282,6 +284,9 @@ export default function ShopReviewPage() {
       key: 'actions',
       render: (_: unknown, record: MallShop) => (
         <div className="flex gap-1">
+          <Link to={`/mall/admin/shops/${record.id}/evidence`}>
+            <Button size="small">监管取证页</Button>
+          </Link>
           {record.status === 'pending' && record.onboarding_stage === 'qualification_submitted' && (
             <>
               <Button size="small" type="primary" onClick={() => { setReviewApproved(true); setReviewTarget(record) }}>
@@ -355,7 +360,8 @@ export default function ShopReviewPage() {
   ]
 
   return (
-    <div className="rounded bg-white" style={{ padding: '16px 20px' }}>
+    <ComplianceAdminLayout title="商家实名与资质审核">
+      <div className="rounded bg-white" style={{ padding: '16px 20px' }}>
       <h3 className="text-base font-bold mb-3" style={{ color: '#333' }}>
         店铺审核
       </h3>
@@ -505,6 +511,7 @@ export default function ShopReviewPage() {
           ? <iframe src={documentPreview.url} title={documentPreview.title} style={{ width: '100%', height: '70vh', border: 0 }} />
           : documentPreview && <Image src={documentPreview.url} alt={documentPreview.title} style={{ width: '100%' }} />}
       </Modal>
-    </div>
+      </div>
+    </ComplianceAdminLayout>
   )
 }

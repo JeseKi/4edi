@@ -30,6 +30,7 @@ from .schemas import (
     PostOut,
     PostReviewIn,
     PublisherVerificationCreateIn,
+    PublisherVerificationEvidenceOut,
     PublisherVerificationOut,
     PublisherVerificationPageOut,
     PublisherVerificationReviewIn,
@@ -84,6 +85,21 @@ async def list_information(
         return {"items": items, "total": total, "page": page, "page_size": page_size}
 
     return await database_executor.run(_list)
+
+
+@admin_router.get(
+    "/verifications/{verification_id}",
+    summary="发布者实名监管取证详情",
+    response_model=PublisherVerificationEvidenceOut,
+)
+async def admin_get_publisher_verification_evidence(
+    verification_id: int,
+    _: AuthenticatedPrincipal = Security(get_current_admin),
+    database_executor: DatabaseExecutor = Depends(get_database_executor),
+):
+    return await database_executor.run(
+        lambda db: service.get_verification_evidence(db, verification_id)
+    )
 
 
 @router.get("/mine", summary="我的发布", response_model=list[PostMineOut])

@@ -55,7 +55,7 @@ def test_full_flow_publish_review_public_list_delete(test_client, init_test_data
     _register_user(test_client, username="alice-info", email="alice-info@example.com")
     alice_headers = _login(test_client, username="alice-info")
     admin_headers = _login_admin(test_client)
-    qualify_user_via_api(test_client, alice_headers, admin_headers)
+    verification_id = qualify_user_via_api(test_client, alice_headers, admin_headers)
 
     # 发布 → 待审核，本人返回完整号码
     resp = test_client.post("/api/information", headers=alice_headers, json=VALID_PAYLOAD)
@@ -65,6 +65,25 @@ def test_full_flow_publish_review_public_list_delete(test_client, init_test_data
     assert created["status"] == "pending"
     assert created["contact_phone"] == "18312345067"
     assert created["category_name"] == "小程序开发"
+
+    # 监管取证详情把实名记录、证件材料引用和关联发布记录串成一条证据链。
+    resp = test_client.get(
+        f"/api/information/admin/verifications/{verification_id}",
+        headers=admin_headers,
+    )
+    assert resp.status_code == 200, resp.text
+    evidence = resp.json()
+    assert evidence["verification"]["id"] == verification_id
+    assert evidence["verification"]["document_front_asset_id"]
+    assert evidence["verification"]["document_back_asset_id"]
+    assert [(item["id"], item["status"]) for item in evidence["posts"]] == [
+        (post_id, "pending")
+    ]
+
+    resp = test_client.get(
+        f"/api/information/admin/verifications/{verification_id}"
+    )
+    assert resp.status_code == 401
 
     # 新的待审核信息不对外公开
     resp = test_client.get("/api/information")

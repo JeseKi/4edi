@@ -1031,6 +1031,90 @@ export interface PublisherVerification {
   is_currently_valid: boolean
 }
 
+export interface PublisherVerificationEvidence {
+  verification: PublisherVerification
+  posts: InformationAdminPost[]
+}
+
+export interface InformationEvidencePost {
+  id: number
+  title: string
+  category: string
+  category_name: string
+  price: string | null
+  content: string
+  attributes: Record<string, string> | null
+  contact_name: string
+  contact_phone: string | null
+  created_at: string
+  reviewed_at: string | null
+  reviewed_by_user_id: number | null
+  status: InfoStatus
+  reject_reason: string | null
+}
+
+export type RegulatoryEvidenceType = 'publisher_verification' | 'shop_qualification'
+
+export interface RegulatoryEvidenceLink {
+  id: number
+  evidence_type: RegulatoryEvidenceType
+  resource_id: number
+  token_hint: string
+  created_by_user_id: number
+  created_at: string
+  revoked_at: string | null
+  last_accessed_at: string | null
+  access_count: number
+}
+
+export interface RegulatoryEvidenceLinkCreated extends RegulatoryEvidenceLink {
+  token: string
+  share_path: string
+}
+
+export interface RegulatoryEvidence {
+  evidence_type: RegulatoryEvidenceType
+  publisher_verification: {
+    verification: PublisherVerification
+    posts: InformationEvidencePost[]
+  } | null
+  shop_qualification: {
+    shop: Pick<
+      MallShop,
+      | 'id'
+      | 'owner_user_id'
+      | 'name'
+      | 'real_name'
+      | 'identity_number_masked'
+      | 'business_license_asset_id'
+      | 'identity_front_asset_id'
+      | 'identity_back_asset_id'
+      | 'legal_entity_name'
+      | 'unified_social_credit_code'
+      | 'legal_representative'
+      | 'registered_address'
+      | 'business_address'
+      | 'business_license_valid_until'
+      | 'business_license_long_term'
+      | 'last_qualification_checked_at'
+      | 'qualification_valid_until'
+      | 'registration_status'
+      | 'status'
+      | 'approved_at'
+    >
+    qualification_reviews: Array<Pick<
+      ShopQualificationReview,
+      | 'id'
+      | 'result'
+      | 'verification_source'
+      | 'checked_at'
+      | 'reviewer_user_id'
+      | 'registration_status'
+      | 'reject_reason'
+    >>
+  } | null
+}
+
 export interface InformationPage {
   items: InformationPost[]
   total: number

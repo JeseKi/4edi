@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { App, Button, Descriptions, Drawer, Form, Input, Modal, Table, Tabs, Tag } from 'antd'
 import dayjs from 'dayjs'
+import { Link } from 'react-router-dom'
 import api from '../../../lib/api'
+import ComplianceAdminLayout from '../../../components/mall/ComplianceAdminLayout'
 import {
   adminListPublisherVerifications,
   adminReviewPublisherVerification,
@@ -66,6 +68,7 @@ export default function PublisherVerificationAdminPage() {
   }
 
   return (
+    <ComplianceAdminLayout title="发布者实名审核">
     <div className="rounded bg-white p-5">
       <h3 className="text-base font-bold mb-3">发布者实名审核</h3>
       <Tabs activeKey={status} onChange={(key) => { setStatus(key as PublisherVerificationStatus | ''); setPage(1) }} items={[...Object.entries(LABELS).map(([key, value]) => ({ key, label: value.text })), { key: '', label: '全部' }]} />
@@ -76,7 +79,7 @@ export default function PublisherVerificationAdminPage() {
         { title: '证件号码', dataIndex: 'document_number_masked' },
         { title: '提交时间', dataIndex: 'submitted_at', render: (value: string) => dayjs(value).format('YYYY-MM-DD HH:mm') },
         { title: '状态', dataIndex: 'status', render: (value: PublisherVerificationStatus) => <Tag color={LABELS[value].color}>{LABELS[value].text}</Tag> },
-        { title: '操作', render: (_: unknown, item: PublisherVerification) => <div className="flex gap-1"><Button size="small" onClick={() => setDetail(item)}>详情</Button>{item.status === 'pending' && <><Button type="primary" size="small" onClick={() => setReview({ item, approved: true })}>通过</Button><Button danger size="small" onClick={() => setReview({ item, approved: false })}>驳回</Button></>}</div> },
+        { title: '操作', render: (_: unknown, item: PublisherVerification) => <div className="flex gap-1"><Button size="small" onClick={() => setDetail(item)}>详情</Button><Link to={`/mall/admin/publisher-verifications/${item.id}/evidence`}><Button size="small">监管取证页</Button></Link>{item.status === 'pending' && <><Button type="primary" size="small" onClick={() => setReview({ item, approved: true })}>通过</Button><Button danger size="small" onClick={() => setReview({ item, approved: false })}>驳回</Button></>}</div> },
       ]} />
       <Drawer title="实名申请详情" open={Boolean(detail)} onClose={() => setDetail(null)}>
         {detail && <Descriptions column={1} bordered size="small">
@@ -84,6 +87,8 @@ export default function PublisherVerificationAdminPage() {
           <Descriptions.Item label="真实姓名">{detail.real_name}</Descriptions.Item>
           <Descriptions.Item label="证件号码">{detail.document_number_masked}</Descriptions.Item>
           <Descriptions.Item label="有效期">{detail.document_long_term ? '长期' : detail.document_valid_until}</Descriptions.Item>
+          <Descriptions.Item label="审核人员">{detail.reviewer_username || '-'}</Descriptions.Item>
+          <Descriptions.Item label="审核时间">{detail.reviewed_at ? dayjs(detail.reviewed_at).format('YYYY-MM-DD HH:mm:ss') : '-'}</Descriptions.Item>
           <Descriptions.Item label="材料"><Button size="small" onClick={() => void openMaterial(detail.document_front_asset_id)}>正面/首页</Button>{detail.document_back_asset_id && <Button className="ml-2" size="small" onClick={() => void openMaterial(detail.document_back_asset_id!)}>背面</Button>}</Descriptions.Item>
           <Descriptions.Item label="驳回原因">{detail.reject_reason || '-'}</Descriptions.Item>
         </Descriptions>}
@@ -92,5 +97,6 @@ export default function PublisherVerificationAdminPage() {
         {!review?.approved && <Form form={form} layout="vertical"><Form.Item name="reject_reason" label="驳回原因" rules={[{ required: true, message: '请填写驳回原因' }]}><Input.TextArea maxLength={300} /></Form.Item></Form>}
       </Modal>
     </div>
+    </ComplianceAdminLayout>
   )
 }

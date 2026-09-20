@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
   App,
+  Alert,
   Button,
   Descriptions,
   Drawer,
@@ -21,6 +22,7 @@ import {
 } from '../../../lib/information'
 import { resolveApiErrorMessage } from '../../../lib/error'
 import type { InfoStatus, InformationAdminPost } from '../../../lib/types'
+import ComplianceAdminLayout from '../../../components/mall/ComplianceAdminLayout'
 
 const MALL_PRIMARY = '#F31947'
 
@@ -45,6 +47,7 @@ export default function InformationAdminPage() {
   const [page, setPage] = useState(1)
   const [items, setItems] = useState<InformationAdminPost[]>([])
   const [total, setTotal] = useState(0)
+  const [pendingTotal, setPendingTotal] = useState(0)
   const [loading, setLoading] = useState(false)
   const [detail, setDetail] = useState<InformationAdminPost | null>(null)
   const [reviewTarget, setReviewTarget] = useState<InformationAdminPost | null>(null)
@@ -54,14 +57,18 @@ export default function InformationAdminPage() {
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const result = await adminListInformation({
-        status: status || undefined,
-        keyword: keyword || undefined,
-        page,
-        page_size: 10,
-      })
+      const [result, pending] = await Promise.all([
+        adminListInformation({
+          status: status || undefined,
+          keyword: keyword || undefined,
+          page,
+          page_size: 10,
+        }),
+        adminListInformation({ status: 'pending', page: 1, page_size: 1 }),
+      ])
       setItems(result.items)
       setTotal(result.total)
+      setPendingTotal(pending.total)
     } catch (err) {
       message.error(resolveApiErrorMessage(err, '信息列表加载失败'))
     } finally {
@@ -125,10 +132,13 @@ export default function InformationAdminPage() {
     { title: '发布人', dataIndex: 'poster_username', key: 'poster_username' },
     { title: '联系电话', dataIndex: 'contact_phone', key: 'contact_phone', render: (v: string | null) => v || '-' },
     {
-      title: '时间',
+      title: '提交 / 等待时间',
       dataIndex: 'created_at',
       key: 'created_at',
-      render: (v: string) => dayjs(v).format('YYYY-MM-DD HH:mm'),
+      render: (v: string, record: InformationAdminPost) => {
+        const hours = Math.max(0, dayjs().diff(dayjs(v), 'hour'))
+        return <div><div>{dayjs(v).format('YYYY-MM-DD HH:mm')}</div>{record.status === 'pending' && <Tag color={hours >= 24 ? 'red' : 'blue'}>{hours >= 24 ? `已超时 ${Math.floor(hours / 24)} 天` : `已等待 ${hours} 小时`}</Tag>}</div>
+      },
     },
     {
       title: '置顶',
@@ -195,10 +205,18 @@ export default function InformationAdminPage() {
   ]
 
   return (
+    <ComplianceAdminLayout title="信息发布审核">
     <div className="rounded bg-white" style={{ padding: '16px 20px' }}>
       <h3 className="text-base font-bold mb-3" style={{ color: '#333' }}>
         信息发布审核
       </h3>
+      <Alert
+        className="mb-3"
+        type={pendingTotal > 0 ? 'warning' : 'success'}
+        showIcon
+        message={pendingTotal > 0 ? `当前有 ${pendingTotal} 条信息待审核，请在 1 个工作日内完成通过或驳回。` : '当前没有待审核信息。'}
+        description={pendingTotal > 0 ? '超过 24 小时的记录将标红；不符合要求的测试内容也必须明确驳回并填写原因，不应长期停留在审核中。' : undefined}
+      />
       <Tabs
         activeKey={status}
         items={TABS}
@@ -270,6 +288,7 @@ export default function InformationAdminPage() {
             <Descriptions.Item label="发布人 ID">{detail.poster_user_id}</Descriptions.Item>
             <Descriptions.Item label="发布人">{detail.poster_username}</Descriptions.Item>
             <Descriptions.Item label="实名记录编号">{detail.publisher_verification_id || '-'}</Descriptions.Item>
+            {detail.publisher_verification_id && <Descriptions.Item label="实名取证"><Link to={`/mall/admin/publisher-verifications/${detail.publisher_verification_id}/evidence`}>打开实名认证监管取证页</Link></Descriptions.Item>}
             <Descriptions.Item label="实名姓名">{detail.publisher_real_name || '-'}</Descriptions.Item>
             <Descriptions.Item label="证件号码">{detail.publisher_document_number_masked || '-'}</Descriptions.Item>
             <Descriptions.Item label="实名有效">
@@ -305,5 +324,6 @@ export default function InformationAdminPage() {
         )}
       </Drawer>
     </div>
+    </ComplianceAdminLayout>
   )
 }
