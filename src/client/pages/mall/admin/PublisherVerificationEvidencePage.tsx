@@ -67,7 +67,7 @@ export default function PublisherVerificationEvidencePage() {
             <Alert
               type="warning"
               showIcon
-              message="本页包含敏感个人信息，截图和打印件仅可提交至本次 EDI 审核渠道，禁止另作他用。"
+              message="本页包含敏感个人信息，截图和打印件仅可提交至本次 ICP 信息发布审核渠道，禁止另作他用。"
             />
 
             <RegulatoryEvidenceLinkPanel evidenceType="publisher_verification" resourceId={item.id} />
@@ -93,9 +93,9 @@ export default function PublisherVerificationEvidencePage() {
             <div className="rounded bg-white p-5">
               <h2 className="font-bold text-base mb-4">实名认证具体材料</h2>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                <ProtectedMaterialPreview assetId={item.document_front_asset_id} title="身份证人像面 / 证件首页" />
+                <ProtectedMaterialPreview assetId={item.document_front_asset_id} title="身份证人像面 / 证件首页" reviewScope="icp" />
                 {item.document_back_asset_id
-                  ? <ProtectedMaterialPreview assetId={item.document_back_asset_id} title="身份证国徽面 / 证件背面" />
+                  ? <ProtectedMaterialPreview assetId={item.document_back_asset_id} title="身份证国徽面 / 证件背面" reviewScope="icp" />
                   : <Alert type="info" message="该证件无背面材料" />}
               </div>
             </div>

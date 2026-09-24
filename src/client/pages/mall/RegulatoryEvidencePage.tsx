@@ -61,7 +61,7 @@ export default function RegulatoryEvidencePage() {
         return (
           <div className="space-y-5">
             <h1 className="text-xl font-bold">发布者实名认证监管核验记录 #{item.id}</h1>
-            <Alert type="warning" showIcon message="本页包含敏感个人信息，仅限本次 EDI 监管审核使用；平台可随时吊销本链接。" />
+            <Alert type="warning" showIcon message="本页包含敏感个人信息，仅限本次 ICP 信息发布审核使用；平台可随时吊销本链接。" />
             <div className="rounded bg-white p-5">
               <Descriptions title="实名审核结论" bordered column={2} size="small">
                 <Descriptions.Item label="实名记录编号">{item.id}</Descriptions.Item>
@@ -82,9 +82,9 @@ export default function RegulatoryEvidencePage() {
             <div className="rounded bg-white p-5">
               <h2 className="font-bold text-base mb-4">实名认证具体材料</h2>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
-                <ProtectedMaterialPreview assetId={item.document_front_asset_id} title="身份证人像面 / 证件首页" regulatoryToken={token} />
+                <ProtectedMaterialPreview assetId={item.document_front_asset_id} title="身份证人像面 / 证件首页" regulatoryToken={token} reviewScope="icp" />
                 {item.document_back_asset_id
-                  ? <ProtectedMaterialPreview assetId={item.document_back_asset_id} title="身份证国徽面 / 证件背面" regulatoryToken={token} />
+                  ? <ProtectedMaterialPreview assetId={item.document_back_asset_id} title="身份证国徽面 / 证件背面" regulatoryToken={token} reviewScope="icp" />
                   : <Alert type="info" message="该证件无背面材料" />}
               </div>
             </div>
@@ -126,13 +126,13 @@ export default function RegulatoryEvidencePage() {
               <h2 className="font-bold text-base mb-4">商家实名与企业资质具体材料</h2>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                 {shop.business_license_asset_id
-                  ? <ProtectedMaterialPreview assetId={shop.business_license_asset_id} title="营业执照" regulatoryToken={token} />
+                  ? <ProtectedMaterialPreview assetId={shop.business_license_asset_id} title="营业执照" regulatoryToken={token} reviewScope="edi" />
                   : <Alert type="error" message="缺少营业执照材料" />}
                 {shop.identity_front_asset_id
-                  ? <ProtectedMaterialPreview assetId={shop.identity_front_asset_id} title="经营者身份证人像面" regulatoryToken={token} />
+                  ? <ProtectedMaterialPreview assetId={shop.identity_front_asset_id} title="经营者身份证人像面" regulatoryToken={token} reviewScope="edi" />
                   : <Alert type="error" message="缺少身份证人像面材料" />}
                 {shop.identity_back_asset_id
-                  ? <ProtectedMaterialPreview assetId={shop.identity_back_asset_id} title="经营者身份证国徽面" regulatoryToken={token} />
+                  ? <ProtectedMaterialPreview assetId={shop.identity_back_asset_id} title="经营者身份证国徽面" regulatoryToken={token} reviewScope="edi" />
                   : <Alert type="error" message="缺少身份证国徽面材料" />}
               </div>
             </div>

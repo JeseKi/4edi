@@ -111,13 +111,13 @@ export default function ShopQualificationEvidencePage() {
               <h2 className="font-bold text-base mb-4">商家实名与企业资质具体材料</h2>
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
                 {shop.business_license_asset_id
-                  ? <ProtectedMaterialPreview assetId={shop.business_license_asset_id} title="营业执照" />
+                  ? <ProtectedMaterialPreview assetId={shop.business_license_asset_id} title="营业执照" reviewScope="edi" />
                   : <Alert type="error" message="缺少营业执照材料" />}
                 {shop.identity_front_asset_id
-                  ? <ProtectedMaterialPreview assetId={shop.identity_front_asset_id} title="经营者身份证人像面" />
+                  ? <ProtectedMaterialPreview assetId={shop.identity_front_asset_id} title="经营者身份证人像面" reviewScope="edi" />
                   : <Alert type="error" message="缺少身份证人像面材料" />}
                 {shop.identity_back_asset_id
-                  ? <ProtectedMaterialPreview assetId={shop.identity_back_asset_id} title="经营者身份证国徽面" />
+                  ? <ProtectedMaterialPreview assetId={shop.identity_back_asset_id} title="经营者身份证国徽面" reviewScope="edi" />
                   : <Alert type="error" message="缺少身份证国徽面材料" />}
               </div>
             </div>

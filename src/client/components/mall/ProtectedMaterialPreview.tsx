@@ -2,16 +2,21 @@ import { useEffect, useState } from 'react'
 import { Alert, Image, Spin } from 'antd'
 import api from '../../lib/api'
 
-const WATERMARK = '仅用于本次 EDI 实名认证审核 · 其他用途无效'
+const WATERMARKS = {
+  icp: '仅用于本次 ICP 信息发布审核 · 其他用途无效',
+  edi: '仅用于本次 EDI 实名认证审核 · 其他用途无效',
+} as const
 
 export default function ProtectedMaterialPreview({
   assetId,
   title,
   regulatoryToken,
+  reviewScope,
 }: {
   assetId: string
   title: string
   regulatoryToken?: string
+  reviewScope: keyof typeof WATERMARKS
 }) {
   const [preview, setPreview] = useState<{ url: string; contentType: string } | null>(null)
   const [error, setError] = useState(false)
@@ -74,7 +79,7 @@ export default function ProtectedMaterialPreview({
                 key={index}
                 style={{ transform: 'rotate(-18deg)', whiteSpace: 'nowrap', fontSize: 18 }}
               >
-                {WATERMARK}
+                {WATERMARKS[reviewScope]}
               </div>
             ))}
           </div>
